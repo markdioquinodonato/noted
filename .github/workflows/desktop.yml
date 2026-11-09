@@ -1,0 +1,188 @@
+name: Desktop build & release
+
+# Builds Noted Desktop (Tauri v2) installers on native GitHub-hosted runners:
+#   Windows x64 (NSIS .exe + .msi), macOS Apple Silicon (.dmg), macOS Intel (.dmg).
+#
+# • Push a tag "vX.Y.Z" (matching package.json) → build all platforms, then publish a
+#   GitHub Release ONLY if every platform succeeded (otherwise it stays a draft).
+# • Run manually ("Run workflow") → build all platforms and upload artifacts; tick
+#   "release" to publish v<package.json version> the same way.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a GitHub Release for v<package.json version> after all platforms build
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.release == true }}
+
+jobs:
+  validate:
+    name: Validate (lint, types, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b
+      - run: npm test
+      - name: Tag must match package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$expected" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json ($expected)"; exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: Noted-Windows-x64
+          - name: macOS Apple Silicon
+            os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: Noted-macOS-AppleSilicon
+          - name: macOS Intel
+            os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: Noted-macOS-Intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ matrix.target }}
+
+      - run: npm ci
+
+      - name: Updater endpoint for this repository
+        shell: bash
+        run: node scripts/desktop-release-config.mjs
+
+      - name: Check updater signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::Repository secret TAURI_SIGNING_PRIVATE_KEY is missing; updater artifacts cannot be signed."
+            exit 1
+          fi
+
+      # Apple signing + notarization are used only when the secrets exist.
+      # Without them the macOS app is ad-hoc signed (runs, but is NOT notarized).
+      - name: Optional Apple signing & notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              [ -n "${!v}" ] && echo "$v=${!v}" >> "$GITHUB_ENV"
+            done
+            echo "Apple Developer signing enabled."
+          else
+            echo "::warning::No Apple Developer certificate configured: macOS build is ad-hoc signed and NOT notarized."
+          fi
+
+      - name: Build installers
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Public, browser-safe values only (never service-role keys).
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SITE_URL: ${{ vars.VITE_SITE_URL }}
+        with:
+          tauriScript: npx tauri
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.release.conf.json
+          tagName: ${{ env.RELEASE == 'true' && 'v__VERSION__' || '' }}
+          releaseName: Noted v__VERSION__
+          releaseBody: |
+            Noted Desktop v__VERSION__ for Windows and macOS.
+
+            • Windows: download the `-setup.exe` (or the `.msi`).
+            • macOS: `aarch64.dmg` for Apple Silicon (M1/M2/M3/M4), `x64.dmg` for Intel Macs.
+
+            These builds are not code-signed with a commercial certificate yet: Windows may show a
+            SmartScreen notice, and on macOS right-click Noted → Open the first time.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+      - name: Collect installers
+        shell: bash
+        run: node scripts/collect-installers.mjs ${{ matrix.target }} installers
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: installers/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish release
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.release == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify every installer is attached, then publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          assets=$(gh release view "$tag" --json assets --jq '.assets[] | select(.size > 0) | .name')
+          echo "$assets"
+          missing=0
+          for pattern in '_x64-setup\.exe$' '_x64_.*\.msi$' '_aarch64\.dmg$' '_x64\.dmg$' '^latest\.json$'; do
+            if ! echo "$assets" | grep -Eq "$pattern"; then
+              echo "::error::Release $tag is missing an asset matching $pattern"; missing=1
+            fi
+          done
+          [ "$missing" = 0 ] || exit 1
+          gh release edit "$tag" --draft=false --latest
+          echo "Published $(gh release view "$tag" --json url --jq .url)"

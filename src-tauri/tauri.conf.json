@@ -1,0 +1,103 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Noted",
+  "version": "../package.json",
+  "identifier": "ph.noted.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev:desktop",
+    "beforeBuildCommand": "npm run build:desktop"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Noted",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 380,
+        "minHeight": 560,
+        "center": true,
+        "resizable": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval' blob:",
+        "worker-src": "'self' blob:",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob: https://*.supabase.co",
+        "media-src": "'self' data: blob: https://*.supabase.co mediastream:",
+        "font-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost data: blob: https://*.supabase.co wss://*.supabase.co",
+        "frame-src": "'none'",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'self'"
+      },
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi",
+      "app",
+      "dmg"
+    ],
+    "publisher": "Noted",
+    "copyright": "© 2026 Noted",
+    "category": "Productivity",
+    "shortDescription": "Noted — Smart Notepad",
+    "longDescription": "A fast, private notepad. Write offline as a guest or sync your notes across devices with a free account.",
+    "homepage": "https://noted-ph.vercel.app",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      },
+      "wix": {
+        "language": "en-US"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": "Entitlements.plist",
+      "signingIdentity": "-",
+      "dmg": {
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        }
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlGNTg5OUM0RTM4NkIwNTQKUldSVXNJYmp4SmxZbjBZUHVtc2VpYTd4UENYWkJ4VndkOWk5S0lqV3k4YUN3Qmt1eGNZSHc5Mk0K",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

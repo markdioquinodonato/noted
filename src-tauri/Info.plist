@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>Noted uses the camera only when you open the text scanner, to read text from a photo into your note. Images are processed on this device.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Noted uses the microphone only when you record a voice note.</string>
+</dict>
+</plist>

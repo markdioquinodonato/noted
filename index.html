@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/brand/noted-mark.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/icon-32.png" />
+    <link rel="apple-touch-icon" href="/brand/icon-180.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0066EF" />
+    <meta name="description" content="Noted — a smart, private notepad. Write instantly as a guest or save to the cloud with a free account." />
+    <title>Noted — Smart Notepad</title>
+    <script>
+      // Apply theme before first paint to avoid a flash of the wrong theme.
+      (function () {
+        try {
+          var t = localStorage.getItem('noted:theme') || 'system';
+          var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Branded splash; React replaces it on first render. -->
+      <div
+        style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font-family:system-ui,sans-serif"
+        aria-busy="true"
+        aria-label="Loading Noted"
+      >
+        <img src="/brand/noted-mark.png" width="64" height="64" alt="" />
+        <span style="font-weight:700;font-size:20px;letter-spacing:-0.01em;color:#0066ef">Noted</span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
