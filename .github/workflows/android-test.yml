@@ -1,0 +1,116 @@
+name: Android emulator test
+
+# Builds Noted for an x86_64 Android emulator and checks it like a user would:
+# the release build must launch without crashing, and the debug build is driven
+# through real journeys (guest note, keyboard typing, restart, back button,
+# export/save dialog, update check). Screenshots + logcat are uploaded.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'index.html'
+      - 'package.json'
+      - 'scripts/android-*'
+      - 'e2e-android/**'
+      - '.github/workflows/android-test.yml'
+
+concurrency:
+  group: android-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator:
+    name: Emulator (Android 15)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;${NDK_VERSION}" > /dev/null
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: android-x86_64
+
+      - run: npm ci
+
+      - name: Generate Android project
+        run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          npx tauri android init --ci
+          bash scripts/android-prepare.sh
+
+      - name: Build debug + release APKs (x86_64)
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SITE_URL: ${{ vars.VITE_SITE_URL }}
+          VITE_RELEASES_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          export NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          npx tauri android build --debug --apk --target x86_64
+          npx tauri android build --apk --target x86_64
+          apks=src-tauri/gen/android/app/build/outputs/apk
+          mkdir -p test-apks
+          cp "$(find $apks -name '*-debug.apk' | head -n 1)" test-apks/debug.apk
+          # Sign the release build with the throwaway debug key (never the real one here).
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          "$tools/zipalign" -p -f 4 "$(find $apks -name '*-release-unsigned.apk' | head -n 1)" test-apks/aligned.apk
+          "$tools/apksigner" sign --ks ~/.android/debug.keystore --ks-pass pass:android \
+            --ks-key-alias androiddebugkey --out test-apks/release.apk test-apks/aligned.apk
+          ls -lh test-apks
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run on Android 15 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          OUT: android-test
+          RELEASE_APK: test-apks/release.apk
+          DEBUG_APK: test-apks/debug.apk
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated
+          script: bash scripts/android-emulator-test.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-test-results
+          path: android-test/
+          if-no-files-found: warn
+          retention-days: 14

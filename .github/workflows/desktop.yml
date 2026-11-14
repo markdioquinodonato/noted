@@ -214,21 +214,13 @@ jobs:
             exit 1
           fi
 
-      # src-tauri/gen is generated, never committed: create the Android project fresh
-      # and give it the Noted launcher icons.
+      # src-tauri/gen is generated, never committed: create the Android project fresh,
+      # then apply Noted's icons, safe-area handling and permissions.
       - name: Generate Android project
         run: |
           export NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
           npx tauri android init --ci
-          npx tauri icon src-tauri/icons/icon.png
-          # Camera (document scanner, photo attachments) and microphone (voice notes):
-          # the WebView asks the user at runtime, but Android requires them declared here.
-          manifest=src-tauri/gen/android/app/src/main/AndroidManifest.xml
-          for perm in CAMERA RECORD_AUDIO MODIFY_AUDIO_SETTINGS; do
-            grep -q "android.permission.$perm\"" "$manifest" ||
-              sed -i "s#<application#<uses-permission android:name=\"android.permission.$perm\" />\n    <application#" "$manifest"
-          done
-          grep -n 'uses-permission' "$manifest"
+          bash scripts/android-prepare.sh
 
       - name: Build APK (arm64 + armv7)
         env:
