@@ -245,7 +245,7 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'noted' }}
+          ANDROID_KEY_ALIAS: noted
         run: |
           set -euo pipefail
           unsigned=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release-unsigned.apk' | head -n 1)
@@ -259,7 +259,7 @@ jobs:
             --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEYSTORE_PASSWORD \
             --out installers/Noted-Android.apk "$RUNNER_TEMP/aligned.apk"
           rm -f "$keystore"
-          "$tools/apksigner" verify --print-certs installers/Noted-Android.apk | grep -E 'Signer #1 certificate (DN|SHA-256)'
+          "$tools/apksigner" verify --verbose --print-certs installers/Noted-Android.apk
           ls -lh installers
 
       - uses: actions/upload-artifact@v4
