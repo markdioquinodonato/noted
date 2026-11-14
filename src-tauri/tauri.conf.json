@@ -33,7 +33,7 @@
         "img-src": "'self' data: blob: https://*.supabase.co",
         "media-src": "'self' data: blob: https://*.supabase.co mediastream:",
         "font-src": "'self' data:",
-        "connect-src": "'self' ipc: http://ipc.localhost data: blob: https://*.supabase.co wss://*.supabase.co",
+        "connect-src": "'self' ipc: http://ipc.localhost data: blob: https://*.supabase.co wss://*.supabase.co https://api.github.com",
         "frame-src": "'none'",
         "object-src": "'none'",
         "base-uri": "'self'",
@@ -57,7 +57,7 @@
     "category": "Productivity",
     "shortDescription": "Noted — Smart Notepad",
     "longDescription": "A fast, private notepad. Write offline as a guest or sync your notes across devices with a free account.",
-    "homepage": "https://noted-ph.vercel.app",
+    "homepage": "https://noted-ph.pages.dev",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

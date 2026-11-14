@@ -8,7 +8,7 @@ async function walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) result.push(...(await walk(path)));
-    else if (entry.name !== 'sw.js') result.push(path);
+    else if (!['sw.js', '_headers', '_redirects'].includes(entry.name)) result.push(path);
   }
   return result;
 }

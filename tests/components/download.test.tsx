@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fetchLatestRelease, pickInstallers } from '@/features/download/releases';
+import { fetchLatestRelease, isNewerVersion, pickInstallers } from '@/features/download/releases';
 import { DownloadDialogHost, openDownloadDialog } from '@/features/download/DownloadDialog';
 import { detectOS } from '@/lib/platform';
 import { act } from 'react';
@@ -24,6 +24,7 @@ const tauriAssets = [
   asset('Noted_1.0.0_x64_en-US.msi'),
   asset('Noted_1.0.0_aarch64.dmg'),
   asset('Noted_1.0.0_x64.dmg'),
+  asset('Noted-Android.apk', { size: 12_000_000 }),
   asset('Noted_aarch64.app.tar.gz'),
   asset('latest.json'),
 ];
@@ -40,6 +41,7 @@ describe('release asset selection', () => {
     expect(picked['windows-msi']?.name).toBe('Noted_1.0.0_x64_en-US.msi');
     expect(picked['mac-arm']?.name).toBe('Noted_1.0.0_aarch64.dmg');
     expect(picked['mac-intel']?.name).toBe('Noted_1.0.0_x64.dmg');
+    expect(picked['android-apk']?.name).toBe('Noted-Android.apk');
   });
 
   it('never offers incomplete, empty or off-repository files', () => {
@@ -111,10 +113,10 @@ describe('Download Noted dialog', () => {
     );
     renderHost();
     act(() => openDownloadDialog());
-    const dialog = await screen.findByRole('dialog', { name: 'Get Noted for Desktop' });
+    const dialog = await screen.findByRole('dialog', { name: 'Download Noted' });
     await waitFor(() =>
       expect(within(dialog).getAllByText(/Coming Soon — Installer Not Available Yet/)).toHaveLength(
-        3,
+        4,
       ),
     );
     for (const b of within(dialog).getAllByRole('button', { name: /Coming Soon/ }))
@@ -157,6 +159,10 @@ describe('Download Noted dialog', () => {
       'href',
       expect.stringMatching(/_x64\.dmg$/),
     );
+    expect(within(dialog).getByRole('link', { name: /Download for Android/ })).toHaveAttribute(
+      'href',
+      expect.stringMatching(/Noted-Android.apk$/),
+    );
     expect(within(dialog).getByText(/Version 1\.2\.3/)).toBeInTheDocument();
   });
 
@@ -190,7 +196,16 @@ describe('Download Noted dialog', () => {
     renderHost();
     act(() => openDownloadDialog());
     const dialog = await screen.findByRole('dialog');
-    await waitFor(() => expect(within(dialog).getAllByText(/Coming Soon/)).toHaveLength(3));
+    await waitFor(() => expect(within(dialog).getAllByText(/Coming Soon/)).toHaveLength(4));
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('app version comparison (Android update check)', () => {
+  it('only reports strictly newer releases', () => {
+    expect(isNewerVersion('1.2.0', '1.1.0')).toBe(true);
+    expect(isNewerVersion('v1.10.0', '1.9.9')).toBe(true);
+    expect(isNewerVersion('1.1.0', '1.1.0')).toBe(false);
+    expect(isNewerVersion('1.0.9', '1.1.0')).toBe(false);
   });
 });

@@ -1,12 +1,13 @@
 {
   "name": "smart-notepad",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/offline-build.mjs",
     "preview": "vite preview",
+    "deploy": "npm run build && npx --yes wrangler@4.162.0 pages deploy dist --project-name=noted-ph --branch=main --commit-dirty=true",
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"tests/**/*.ts\" \"e2e/**/*.ts\"",

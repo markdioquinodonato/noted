@@ -5,7 +5,7 @@
  * that failed (and therefore was never published) is never offered.
  */
 
-export type InstallerKey = 'windows-exe' | 'windows-msi' | 'mac-arm' | 'mac-intel';
+export type InstallerKey = 'windows-exe' | 'windows-msi' | 'mac-arm' | 'mac-intel' | 'android-apk';
 
 export interface Installer {
   key: InstallerKey;
@@ -49,7 +49,20 @@ const PATTERNS: Record<InstallerKey, RegExp[]> = {
   'windows-msi': [/_x64_[a-z-]+\.msi$/i, /^Noted-Windows-x64\.msi$/i],
   'mac-arm': [/_aarch64\.dmg$/i, /^Noted-macOS-AppleSilicon\.dmg$/i],
   'mac-intel': [/_x64\.dmg$/i, /^Noted-macOS-Intel\.dmg$/i],
+  'android-apk': [/^Noted-Android\.apk$/i, /\.apk$/i],
 };
+
+/** True when release version `latest` (e.g. "1.2.0") is newer than `current`. */
+export function isNewerVersion(latest: string, current: string): boolean {
+  const parse = (v: string) => v.replace(/^v/, '').split(/[.+-]/).slice(0, 3).map(Number);
+  const [a, b] = [parse(latest), parse(current)];
+  for (let i = 0; i < 3; i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
 
 export function pickInstallers(repo: string, assets: GitHubAsset[]): ReleaseInfo['installers'] {
   const prefix = `https://github.com/${repo}/releases/download/`;

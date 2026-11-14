@@ -1,7 +1,8 @@
-name: Desktop build & release
+name: App build & release
 
-# Builds Noted Desktop (Tauri v2) installers on native GitHub-hosted runners:
-#   Windows x64 (NSIS .exe + .msi), macOS Apple Silicon (.dmg), macOS Intel (.dmg).
+# Builds Noted (Tauri v2) installers on native GitHub-hosted runners:
+#   Windows x64 (NSIS .exe + .msi), macOS Apple Silicon (.dmg), macOS Intel (.dmg),
+#   Android (signed universal arm64 + armv7 .apk).
 #
 # • Push a tag "vX.Y.Z" (matching package.json) → build all platforms, then publish a
 #   GitHub Release ONLY if every platform succeeded (otherwise it stays a draft).
@@ -140,8 +141,10 @@ jobs:
           tagName: ${{ env.RELEASE == 'true' && 'v__VERSION__' || '' }}
           releaseName: Noted v__VERSION__
           releaseBody: |
-            Noted Desktop v__VERSION__ for Windows and macOS.
+            Noted v__VERSION__ for Android, Windows and macOS.
 
+            • Android: download `Noted-Android.apk` on your phone, open it and tap Install
+              (allow "Install unknown apps" for your browser if asked). Android 7.0+.
             • Windows: download the `-setup.exe` (or the `.msi`).
             • macOS: `aarch64.dmg` for Apple Silicon (M1/M2/M3/M4), `x64.dmg` for Intel Macs.
 
@@ -163,22 +166,127 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  android:
+    name: Build (Android APK)
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;${NDK_VERSION}" > /dev/null
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: android
+
+      - run: npm ci
+
+      - name: Check Android signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            echo "::error::Repository secrets ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD are missing; the APK cannot be signed."
+            exit 1
+          fi
+
+      # src-tauri/gen is generated, never committed: create the Android project fresh
+      # and give it the Noted launcher icons.
+      - name: Generate Android project
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+        run: |
+          npx tauri android init --ci
+          npx tauri icon src-tauri/icons/icon.png
+          # Camera (document scanner, photo attachments) and microphone (voice notes):
+          # the WebView asks the user at runtime, but Android requires them declared here.
+          manifest=src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          for perm in CAMERA RECORD_AUDIO MODIFY_AUDIO_SETTINGS; do
+            grep -q "android.permission.$perm\"" "$manifest" ||
+              sed -i "s#<application#<uses-permission android:name=\"android.permission.$perm\" />\n    <application#" "$manifest"
+          done
+          grep -n 'uses-permission' "$manifest"
+
+      - name: Build APK (arm64 + armv7)
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          # Public, browser-safe values only (never service-role keys).
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+          VITE_SITE_URL: ${{ vars.VITE_SITE_URL }}
+          VITE_RELEASES_REPO: ${{ github.repository }}
+        run: npx tauri android build --apk --target aarch64 --target armv7
+
+      - name: Sign APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'noted' }}
+        run: |
+          set -euo pipefail
+          unsigned=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release-unsigned.apk' | head -n 1)
+          if [ -z "$unsigned" ]; then echo "::error::No unsigned release APK was produced."; exit 1; fi
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          keystore="$RUNNER_TEMP/noted-release.p12"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          mkdir -p installers
+          "$tools/zipalign" -p -f 4 "$unsigned" "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" sign --ks "$keystore" --ks-type PKCS12 --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --out installers/Noted-Android.apk "$RUNNER_TEMP/aligned.apk"
+          rm -f "$keystore"
+          "$tools/apksigner" verify --print-certs installers/Noted-Android.apk | grep -E 'Signer #1 certificate (DN|SHA-256)'
+          ls -lh installers
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Noted-Android
+          path: installers/Noted-Android.apk
+          if-no-files-found: error
+          retention-days: 30
+
   publish:
     name: Publish release
-    needs: build
+    needs: [build, android]
     if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.release == true }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify every installer is attached, then publish
+      - uses: actions/download-artifact@v4
+        with:
+          name: Noted-Android
+          path: android
+      - name: Attach the Android APK, verify every installer is attached, then publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="v$(node -p "require('./package.json').version")"
+          gh release upload "$tag" android/Noted-Android.apk --clobber
           assets=$(gh release view "$tag" --json assets --jq '.assets[] | select(.size > 0) | .name')
           echo "$assets"
           missing=0
-          for pattern in '_x64-setup\.exe$' '_x64_.*\.msi$' '_aarch64\.dmg$' '_x64\.dmg$' '^latest\.json$'; do
+          for pattern in '_x64-setup\.exe$' '_x64_.*\.msi$' '_aarch64\.dmg$' '_x64\.dmg$' '^latest\.json$' '^Noted-Android\.apk$'; do
             if ! echo "$assets" | grep -Eq "$pattern"; then
               echo "::error::Release $tag is missing an asset matching $pattern"; missing=1
             fi

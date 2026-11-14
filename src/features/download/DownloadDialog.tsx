@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, Globe, Laptop, Monitor, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Download, Globe, Laptop, Monitor, RefreshCw, ShieldAlert, Smartphone } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -65,16 +65,40 @@ function DownloadContent({ onClose }: { onClose: () => void }) {
   }, [os]);
 
   const info: ReleaseInfo | null | undefined = release.data;
-  const mobile = os === 'android' || os === 'ios';
-  const anyAvailable = !!info && Object.keys(info.installers).length > 0;
+  const desktopAvailable =
+    !!info && Object.keys(info.installers).some((key) => key !== 'android-apk');
+
+  const androidCard = (
+    <PlatformCard
+      key="android"
+      title="Android"
+      subtitle="Android 7.0 or later"
+      icon={<Smartphone />}
+      recommended={os === 'android'}
+      loading={release.isLoading}
+      version={info?.version}
+    >
+      <InstallerButton
+        installer={info?.installers['android-apk']}
+        label="Download for Android"
+        format=".apk app"
+        loading={release.isLoading}
+        primary
+      />
+      <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+        After downloading, open the file and tap Install. If asked, allow your browser to install
+        apps (“Install unknown apps”).
+      </p>
+    </PlatformCard>
+  );
 
   return (
     <>
       <DialogHeader>
-        <DialogTitle className="text-xl">Get Noted for Desktop</DialogTitle>
+        <DialogTitle className="text-xl">Download Noted</DialogTitle>
         <DialogDescription>
-          Take your notes anywhere. Download Noted for Windows or macOS and enjoy a seamless desktop
-          experience.
+          Take your notes anywhere. Get Noted for Android, Windows or macOS — it works offline and
+          syncs with your free account.
         </DialogDescription>
       </DialogHeader>
 
@@ -90,14 +114,15 @@ function DownloadContent({ onClose }: { onClose: () => void }) {
           </button>
         </Alert>
       )}
-      {mobile && (
+      {os === 'ios' && (
         <Alert>
-          Noted for desktop runs on Windows and macOS computers. On this device, keep using Noted in
-          your browser.
+          Noted isn’t available on the App Store yet. On iPhone and iPad, keep using Noted in your
+          browser — tip: Share → Add to Home Screen.
         </Alert>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2" data-testid="download-options">
+        {os === 'android' && androidCard}
         <PlatformCard
           title="Windows"
           subtitle="Windows 10 and 11 (64-bit)"
@@ -151,9 +176,10 @@ function DownloadContent({ onClose }: { onClose: () => void }) {
             “Processor: Intel” means Intel.
           </p>
         </PlatformCard>
+        {os !== 'android' && androidCard}
       </div>
 
-      {anyAvailable && (
+      {desktopAvailable && (
         <p className="flex gap-2 text-xs leading-relaxed text-muted-foreground">
           <ShieldAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           These installers are not code-signed yet. Windows may show a SmartScreen notice (choose
@@ -175,7 +201,7 @@ function DownloadContent({ onClose }: { onClose: () => void }) {
         )}
         {!info && !release.isLoading && !release.isError && (
           <span className="text-xs text-muted-foreground sm:mr-auto">
-            Desktop installers haven’t been published yet.
+            Installers haven’t been published yet.
           </span>
         )}
         {release.isFetching && !release.isLoading && (

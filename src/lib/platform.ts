@@ -1,12 +1,20 @@
 /**
- * Runtime platform helpers. The same React app runs on the web (Vercel) and
- * inside the Tauri desktop shell; desktop-only modules are imported lazily so
+ * Runtime platform helpers. The same React app runs on the web (Cloudflare
+ * Pages) and inside the Tauri desktop/Android shell; native-only modules are imported lazily so
  * the web bundle never depends on Tauri APIs being present.
  */
 
-/** True when running inside the Noted desktop app (Tauri webview). */
+/**
+ * True when running inside a native Noted app (Tauri webview): the desktop
+ * app on Windows/macOS and the Android app alike.
+ */
 export function isDesktopApp(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** True only inside the Noted Android app (updates arrive as new signed APKs). */
+export function isAndroidApp(): boolean {
+  return isDesktopApp() && /android/i.test(navigator.userAgent);
 }
 
 export type DesktopOS = 'windows' | 'macos' | 'linux' | 'android' | 'ios' | 'other';

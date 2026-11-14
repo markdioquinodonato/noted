@@ -315,9 +315,14 @@ export function WelcomePage() {
               <button
                 type="button"
                 onClick={openDownloadDialog}
-                className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+                className="group mt-5 inline-flex h-11 items-center gap-2.5 rounded-xl border border-primary/35 bg-primary/[0.07] px-4 text-sm font-semibold text-primary shadow-sm transition-colors hover:border-primary/60 hover:bg-primary/[0.12] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none dark:border-primary/45 dark:bg-primary/15 dark:hover:bg-primary/25"
               >
-                <MonitorDown className="size-4" aria-hidden="true" /> Get Noted for Windows or macOS
+                <MonitorDown className="size-[18px]" aria-hidden="true" />
+                Download Noted for Android, Windows &amp; macOS
+                <ArrowRight
+                  className="size-4 transition-transform group-hover:translate-x-0.5"
+                  aria-hidden="true"
+                />
               </button>
             )}
 

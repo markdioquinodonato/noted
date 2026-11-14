@@ -4,6 +4,7 @@
  * the website.
  */
 import { toast } from 'sonner';
+import { isAndroidApp } from '@/lib/platform';
 
 /** Open http(s)/mailto links in the user's default browser, never inside the app window. */
 function interceptExternalLinks() {
@@ -70,6 +71,7 @@ export async function checkForUpdates({ silent }: { silent: boolean }): Promise<
   if (checking) return 'none';
   checking = true;
   try {
+    if (isAndroidApp()) return await checkAndroidUpdate(silent);
     const { check } = await import('@tauri-apps/plugin-updater');
     const update = await check();
     if (!update) {
@@ -93,6 +95,33 @@ export async function checkForUpdates({ silent }: { silent: boolean }): Promise<
   } finally {
     checking = false;
   }
+}
+
+/**
+ * Android has no in-app updater: compare with the latest published GitHub
+ * Release and offer its signed APK. Android itself verifies that the new APK
+ * carries the same signing key before installing it over the current app.
+ */
+async function checkAndroidUpdate(silent: boolean): Promise<UpdateCheckResult> {
+  const [{ releasesRepo, fetchLatestRelease, isNewerVersion }, { getVersion }] = await Promise.all([
+    import('@/features/download/releases'),
+    import('@tauri-apps/api/app'),
+  ]);
+  const repo = releasesRepo();
+  if (!repo) throw new Error('No releases repository configured');
+  const [info, current] = await Promise.all([fetchLatestRelease(repo), getVersion()]);
+  const apk = info?.installers['android-apk'];
+  if (!info || !apk || !isNewerVersion(info.version, current)) {
+    if (!silent) toast.success('You have the latest version of Noted.');
+    return 'none';
+  }
+  toast(`Noted ${info.version} is available.`, {
+    id: 'android-update',
+    duration: Infinity,
+    description: 'Download the new APK, then open it to update. Your notes are kept.',
+    action: { label: 'Download', onClick: () => void openExternal(apk.url) },
+  });
+  return 'available';
 }
 
 async function installUpdate(

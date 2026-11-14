@@ -5,6 +5,22 @@ import './lib/theme';
 import { App } from './app/App';
 import { isDesktopApp } from './lib/platform';
 
+// After a new deploy, an open tab may request code-split files from the previous
+// build that no longer exist. Reload once to pick up the current version instead
+// of leaving a broken page (guarded so it can never loop).
+window.addEventListener('vite:preloadError', (event) => {
+  try {
+    const key = 'noted:chunk-reload';
+    const last = Number(sessionStorage.getItem(key) || 0);
+    if (Date.now() - last < 30_000) return;
+    sessionStorage.setItem(key, String(Date.now()));
+    event.preventDefault();
+    window.location.reload();
+  } catch {
+    /* storage unavailable: let the error surface */
+  }
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

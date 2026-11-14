@@ -62,7 +62,7 @@ export function siteUrl(): string {
     /^https?:$/.test(window.location.protocol) &&
     !/tauri\.localhost$/.test(window.location.hostname)
       ? window.location.origin
-      : 'https://noted-ph.vercel.app';
+      : 'https://noted-ph.pages.dev';
   // Email links (verification / password reset) must open the public website,
   // never the desktop app's internal origin.
   return (configuredUrl || origin).replace(/\/$/, '');

@@ -410,8 +410,14 @@ function DesktopSection() {
   const [checking, setChecking] = useState(false);
   if (!desktop)
     return (
-      <Section title="Desktop app" description="Use Noted as an app on your Windows PC or Mac.">
-        <Row label="Noted for Windows & macOS" hint="Works offline and opens in its own window.">
+      <Section
+        title="Noted apps"
+        description="Use Noted as an app on your Android phone, Windows PC or Mac."
+      >
+        <Row
+          label="Noted for Android, Windows & macOS"
+          hint="Works offline and opens in its own window."
+        >
           <Button variant="outline" onClick={openDownloadDialog}>
             <MonitorDown /> Download Noted
           </Button>

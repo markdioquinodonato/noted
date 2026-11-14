@@ -50,13 +50,13 @@ The installers are also uploaded as workflow artifacts with friendly names: `Not
 | Secret | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | empty (the key was generated without a password) |
 | Variable | `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` |
 | Variable | `VITE_SUPABASE_PUBLISHABLE_KEY` | publishable key |
-| Variable | `VITE_SITE_URL` | `https://noted-ph.vercel.app` |
+| Variable | `VITE_SITE_URL` | `https://noted-ph.pages.dev` |
 
 **Back up `.tauri-signing/noted-updater.key`.** If it is lost, installed apps can no longer receive updates; users would have to reinstall manually.
 
 ### Website download buttons
 
-Set `VITE_RELEASES_REPO=<owner>/<repo>` in the Vercel project. The dialog reads `https://api.github.com/repos/<owner>/<repo>/releases/latest`, which only returns **published** releases, and links straight to the release assets. Missing installers show "Coming Soon — Installer Not Available Yet". In the desktop app the download entry is replaced by **Check for updates**.
+Set `VITE_RELEASES_REPO=<owner>/<repo>` in `.env.production.local` before building for Cloudflare Pages. The dialog reads `https://api.github.com/repos/<owner>/<repo>/releases/latest`, which only returns **published** releases, and links straight to the release assets. Missing installers show "Coming Soon — Installer Not Available Yet". In the desktop app the download entry is replaced by **Check for updates**.
 
 ## Code signing & notarization
 
