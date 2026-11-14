@@ -176,6 +176,27 @@ await step('settings: "Check for updates" works on Android', async () => {
   await shot('09-update-check');
 });
 
+await step('status/navigation bar strips follow the app theme (dark mode)', async () => {
+  await page.evaluate(() => localStorage.setItem('noted:theme', 'dark'));
+  await page.reload();
+  await expect(page.locator('html.dark')).toHaveCount(1, { timeout: 20_000 });
+  await sleep(1500);
+  await shot('10-dark-mode');
+  // Raw screencap: 16-byte header (w, h, format, colorspace) then RGBA pixels.
+  const raw = await device.shell('screencap');
+  const w = raw.readUInt32LE(0);
+  const h = raw.readUInt32LE(4);
+  const px = (x, y) => [...raw.subarray(16 + (y * w + x) * 4, 16 + (y * w + x) * 4 + 3)];
+  for (const [name, [r, g, b]] of [
+    ['status bar', px(Math.round(w / 2), 8)],
+    ['navigation bar', px(20, h - 8)],
+  ]) {
+    console.log(`${name} pixel: rgb(${r}, ${g}, ${b})`);
+    expect(r + g + b, `${name} should be dark, got rgb(${r}, ${g}, ${b})`).toBeLessThan(150);
+  }
+  await page.evaluate(() => localStorage.setItem('noted:theme', 'system'));
+});
+
 await step('no uncaught JavaScript errors', async () => {
   const fatal = jsErrors.filter((e) => e.startsWith('pageerror'));
   expect(fatal, fatal.join('\n')).toHaveLength(0);

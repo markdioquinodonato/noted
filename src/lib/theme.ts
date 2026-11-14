@@ -35,6 +35,14 @@ function apply() {
   if (typeof document === 'undefined') return;
   document.documentElement.classList.toggle('dark', state.resolved === 'dark');
   document.documentElement.style.colorScheme = state.resolved;
+  // Android app: paint the status/navigation bar strips to match (MainActivity.kt).
+  try {
+    (
+      window as Window & { NotedAndroid?: { setTheme(theme: string): void } }
+    ).NotedAndroid?.setTheme(state.resolved);
+  } catch {
+    /* not in the Android app */
+  }
 }
 
 export function setThemePreference(preference: ThemePreference) {
