@@ -177,8 +177,8 @@ await step('settings: "Check for updates" works on Android', async () => {
 });
 
 await step('status/navigation bar strips follow the app theme (dark mode)', async () => {
-  await page.evaluate(() => localStorage.setItem('noted:theme', 'dark'));
-  await page.reload();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.getByRole('radio', { name: 'Dark', exact: true }).click();
   await expect(page.locator('html.dark')).toHaveCount(1, { timeout: 20_000 });
   await sleep(1500);
   await shot('10-dark-mode');
@@ -194,7 +194,7 @@ await step('status/navigation bar strips follow the app theme (dark mode)', asyn
     console.log(`${name} pixel: rgb(${r}, ${g}, ${b})`);
     expect(r + g + b, `${name} should be dark, got rgb(${r}, ${g}, ${b})`).toBeLessThan(150);
   }
-  await page.evaluate(() => localStorage.setItem('noted:theme', 'system'));
+  await page.getByRole('radio', { name: 'System', exact: true }).click();
 });
 
 await step('no uncaught JavaScript errors', async () => {
