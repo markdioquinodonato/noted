@@ -79,7 +79,7 @@ jobs:
           apks=src-tauri/gen/android/app/build/outputs/apk
           mkdir -p test-apks
           cp "$(find $apks -name '*-debug.apk' | head -n 1)" test-apks/debug.apk
-          # Sign the release build with the throwaway debug key (never the real one here).
+          # Sign the release build with a throwaway key (never the real one here).
           tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
           "$tools/zipalign" -p -f 4 "$(find $apks -name '*-release-unsigned.apk' | head -n 1)" test-apks/aligned.apk
           "$tools/apksigner" sign --ks ~/.android/debug.keystore --ks-pass pass:android \
