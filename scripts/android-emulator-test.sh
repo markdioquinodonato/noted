@@ -16,6 +16,12 @@ crashes() { grep -E "FATAL EXCEPTION|AndroidRuntime: Process: $PKG|panicked at|F
 
 adb shell getprop ro.build.version.release | sed 's/^/Android /'
 adb shell wm size
+# The CI emulator is slow: its own launcher often shows "isn't responding", which
+# steals focus/keys from the app under test. Hide system ANR/crash dialogs (crashes
+# are still detected through logcat) and let the system settle.
+adb shell settings put global hide_error_dialogs 1
+adb shell input keyevent KEYCODE_HOME
+sleep 20
 
 echo "== Release build: launch"
 adb install -r "$RELEASE_APK" || { echo "::error::Release APK failed to install"; exit 1; }

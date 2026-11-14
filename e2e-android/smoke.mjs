@@ -35,7 +35,22 @@ async function launch() {
   return page;
 }
 
+/** Leave any system UI (pickers, dialogs) so the app's activity is resumed again. */
+async function ensureForeground() {
+  for (let i = 0; i < 3; i++) {
+    const focus = await shell('dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true');
+    if (
+      focus.includes(`${PKG}/${PKG}.MainActivity`) &&
+      !/documentsui|Application Not Responding/i.test(focus)
+    )
+      return;
+    await shell('input keyevent 4');
+    await sleep(1500);
+  }
+}
+
 async function step(name, fn) {
+  await ensureForeground();
   try {
     await fn();
     results.push(`PASS  ${name}`);
@@ -125,17 +140,31 @@ await step('export as .txt opens the Android save dialog and saves', async () =>
   await page.getByText(title).first().click();
   await page.getByRole('button', { name: 'More note actions' }).click();
   await page.getByRole('menuitem', { name: 'Export as .txt' }).click();
-  // System "Save to" picker (DocumentsUI) — confirm with its Save button.
-  const save = { res: /com\.(google\.)?android\.documentsui:id\/(action_menu_)?(save|positive)/ };
-  await device.wait(save, { timeout: 20_000 });
+  // System "Save to" picker (DocumentsUI) — confirm with its SAVE button, found via
+  // a UI Automator dump (works without Playwright's helper APKs).
+  let bounds = null;
+  for (let i = 0; i < 20 && !bounds; i++) {
+    await sleep(1000);
+    const xml = await shell('uiautomator dump /sdcard/ui.xml > /dev/null && cat /sdcard/ui.xml');
+    const node = xml
+      .split('<node ')
+      .find(
+        (n) => /package="com\.(google\.)?android\.documentsui"/.test(n) && /text="SAVE"/i.test(n),
+      );
+    const m = node?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    if (m) bounds = m.slice(1).map(Number);
+  }
+  if (!bounds) throw new Error('Android save picker with a SAVE button did not appear');
   await shot('06-save-dialog');
-  await device.tap(save);
+  const [x1, y1, x2, y2] = bounds;
+  await shell(`input tap ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)}`);
   await expect(page.getByText(/^Saved .*\.txt$/)).toBeVisible({ timeout: 15_000 });
   await shot('07-saved');
 });
 
 await step('settings: "Check for updates" works on Android', async () => {
-  await page.evaluate(() => window.location.assign('/settings'));
+  await page.keyboard.press('Escape');
+  await page.goto(new URL('/settings', page.url()).href);
   await expect(page.getByRole('button', { name: /Check for updates/ })).toBeVisible({
     timeout: 20_000,
   });
