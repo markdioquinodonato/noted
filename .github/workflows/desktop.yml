@@ -217,9 +217,8 @@ jobs:
       # src-tauri/gen is generated, never committed: create the Android project fresh
       # and give it the Noted launcher icons.
       - name: Generate Android project
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
         run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
           npx tauri android init --ci
           npx tauri icon src-tauri/icons/icon.png
           # Camera (document scanner, photo attachments) and microphone (voice notes):
@@ -233,13 +232,14 @@ jobs:
 
       - name: Build APK (arm64 + armv7)
         env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
           # Public, browser-safe values only (never service-role keys).
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SITE_URL: ${{ vars.VITE_SITE_URL }}
           VITE_RELEASES_REPO: ${{ github.repository }}
-        run: npx tauri android build --apk --target aarch64 --target armv7
+        run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          npx tauri android build --apk --target aarch64 --target armv7
 
       - name: Sign APK
         env:
