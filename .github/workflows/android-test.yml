@@ -82,8 +82,10 @@ jobs:
           # Sign the release build with a throwaway key (never the real one here).
           tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
           "$tools/zipalign" -p -f 4 "$(find $apks -name '*-release-unsigned.apk' | head -n 1)" test-apks/aligned.apk
-          "$tools/apksigner" sign --ks ~/.android/debug.keystore --ks-pass pass:android \
-            --ks-key-alias androiddebugkey --out test-apks/release.apk test-apks/aligned.apk
+          keytool -genkeypair -keystore "$RUNNER_TEMP/test.jks" -storepass android -keypass android \
+            -alias test -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Noted CI test" > /dev/null
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/test.jks" --ks-pass pass:android \
+            --ks-key-alias test --out test-apks/release.apk test-apks/aligned.apk
           ls -lh test-apks
 
       - name: Enable KVM
