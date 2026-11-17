@@ -126,19 +126,33 @@ await step('note survives closing and reopening the app', async () => {
 });
 
 await step('Android back button navigates inside the app instead of quitting', async () => {
-  const done = page.getByRole('button', { name: 'Done', exact: true });
-  if (!(await done.isVisible())) await page.getByText(title).first().click();
+  await expect(page).toHaveURL(/\/notes(?:\?|$)/);
+  const libraryHeight = await page.evaluate(() => window.innerHeight);
+  await page.getByText(title).first().click();
   await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}/);
-  const before = page.url();
-  await shell('input keyevent 4'); // KEYCODE_BACK
-  await expect.poll(() => page.url(), { timeout: 10_000 }).not.toBe(before);
+  // Opening a note focuses the body. Let Android dismiss the IME first so
+  // KEYCODE_BACK reaches the activity instead of being consumed by the keyboard.
+  const body = page.getByRole('textbox', { name: 'Note content' });
+  await expect(body).toBeFocused();
+  await body.evaluate((element) => element.blur());
+  const isKeyboardVisible = () =>
+    page.evaluate((height) => window.innerHeight < height - 60, libraryHeight);
+  if (await isKeyboardVisible()) {
+    await shell('input keyevent 4');
+    await expect.poll(isKeyboardVisible).toBe(false);
+  }
+  if (/\/notes\/[0-9a-f-]{36}/.test(page.url())) {
+    await shell('input keyevent 4'); // KEYCODE_BACK
+  }
+  await expect(page).toHaveURL(/\/notes(?:\?|$)/, { timeout: 10_000 });
   expect(await shell(`pidof ${PKG}`)).not.toBe('');
   await shot('05-after-back');
 });
 
 await step('export as .txt opens the Android save dialog and saves', async () => {
-  await page.getByText(title).first().click();
-  await page.getByRole('button', { name: 'More note actions' }).click();
+  const more = page.getByRole('button', { name: 'More note actions' });
+  if (!(await more.isVisible())) await page.getByText(title).first().click();
+  await more.click();
   await page.getByRole('menuitem', { name: 'Export as .txt' }).click();
   // System "Save to" picker (DocumentsUI) — confirm with its SAVE button, found via
   // a UI Automator dump (works without Playwright's helper APKs).
