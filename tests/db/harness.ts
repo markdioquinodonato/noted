@@ -28,10 +28,22 @@ const SUPABASE_PLATFORM_STUB = `
     id uuid primary key,
     email text unique,
     email_change text default '',
+    email_confirmed_at timestamptz default now(),
+    created_at timestamptz default now(),
+    last_sign_in_at timestamptz,
+    deleted_at timestamptz,
+    banned_until timestamptz,
+    is_anonymous boolean default false,
     raw_user_meta_data jsonb default '{}'::jsonb
   );
+  create table auth.mfa_factors(id uuid primary key default gen_random_uuid(),user_id uuid references auth.users(id),status text not null,factor_type text default 'totp');
+  create table auth.audit_log_entries(id uuid primary key default gen_random_uuid(),created_at timestamptz default now(),payload json);
+  alter table storage.objects add column metadata jsonb;
   create function auth.uid() returns uuid language sql stable as $$
     select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+  $$;
+  create function auth.jwt() returns jsonb language sql stable as $$
+    select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb
   $$;
 
   grant usage on schema public, auth, extensions to anon, authenticated, service_role;

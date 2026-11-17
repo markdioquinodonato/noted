@@ -1,24 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router';
-import {
-  ArrowRight,
-  BellRing,
-  Check,
-  Cloud,
-  FolderTree,
-  HardDrive,
-  Info,
-  LockKeyhole,
-  MailCheck,
-  Moon,
-  NotebookPen,
-  Palette,
-  PenLine,
-  ScanText,
-  ShieldCheck,
-  Sparkles,
-  Sun,
-} from 'lucide-react';
+import { ArrowRight, Cloud, HardDrive, MailCheck, Moon, PenLine, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,13 +8,14 @@ import { Alert, FullPageSpinner, Spinner } from '@/components/common';
 import { BrandLockup, BrandMark } from '@/components/BrandLogo';
 import { usePreferences } from '@/features/notes/hooks';
 import { useThemeState } from '@/lib/theme';
-import { cn } from '@/lib/utils';
 import { guestMode, postAuthNext, sanitizeNext } from '@/lib/mode';
-import { supabase } from '@/lib/supabase';
+import { supabase, siteUrl, requestEmailSignIn } from '@/lib/supabase';
 import { AuthLayout } from './AuthLayout';
 import { GmailField, normalizeGmail, useGmailField } from './gmail';
 import { PasswordPairFields, usePasswordPair } from './passwordFields';
 import { authErrorMessage, useAuth } from './AuthProvider';
+import { useEmailCooldown } from './emailCooldown';
+import { completeAuthCallback, confirmEmailSignIn, emailConfirmationFromUrl } from './authCallback';
 import { openDownloadDialog } from '@/features/download/DownloadDialog';
 import { isDesktopApp } from '@/lib/platform';
 import { MonitorDown } from 'lucide-react';
@@ -49,45 +32,6 @@ function NotConfigured() {
 // ---------------------------------------------------------------------------
 // Welcome
 // ---------------------------------------------------------------------------
-const FEATURES = [
-  {
-    icon: ScanText,
-    title: 'Scan text with your camera',
-    body: 'Point at a page and Noted reads it automatically — right inside the note you’re writing.',
-    tone: 'from-sky-500/15 text-sky-600 dark:text-sky-400',
-  },
-  {
-    icon: PenLine,
-    title: 'A writing space that gets out of the way',
-    body: 'Headings, checklists, tables, highlights and links with a clean, focused editor.',
-    tone: 'from-violet-500/15 text-violet-600 dark:text-violet-400',
-  },
-  {
-    icon: Palette,
-    title: 'Color-coded notes',
-    body: 'Give each note its own color theme so ideas, school and work are easy to tell apart.',
-    tone: 'from-rose-500/15 text-rose-600 dark:text-rose-400',
-  },
-  {
-    icon: FolderTree,
-    title: 'Folders, tags & search',
-    body: 'Organize everything your way and find any note in a keystroke.',
-    tone: 'from-amber-500/15 text-amber-600 dark:text-amber-400',
-  },
-  {
-    icon: BellRing,
-    title: 'Reminders & voice',
-    body: 'Set reminders on notes, record voice memos and dictate when typing is slow.',
-    tone: 'from-emerald-500/15 text-emerald-600 dark:text-emerald-400',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Private and offline-ready',
-    body: 'Guest notes never leave your device. Sync to the cloud only if you choose to.',
-    tone: 'from-blue-500/15 text-blue-600 dark:text-blue-400',
-  },
-] as const;
-
 function ThemeToggle() {
   const { resolved } = useThemeState();
   const { update } = usePreferences();
@@ -105,332 +49,118 @@ function ThemeToggle() {
   );
 }
 
-/** Decorative product preview built from real UI primitives (no screenshots). */
-function AppPreview() {
-  return (
-    <div aria-hidden="true" className="relative mx-auto w-full max-w-[560px] select-none">
-      <div className="absolute -inset-6 rounded-[2.5rem] bg-gradient-to-tr from-primary/25 via-violet-500/15 to-sky-400/20 blur-3xl" />
-      <div className="relative overflow-hidden rounded-2xl border bg-card shadow-2xl shadow-slate-900/15 dark:shadow-black/40">
-        <div className="flex h-9 items-center gap-1.5 border-b bg-muted/60 px-3">
-          <span className="size-2.5 rounded-full bg-rose-400/80" />
-          <span className="size-2.5 rounded-full bg-amber-400/80" />
-          <span className="size-2.5 rounded-full bg-emerald-400/80" />
-          <span className="ml-3 h-4 w-40 rounded-md bg-background/80" />
-        </div>
-        <div className="grid grid-cols-[120px_1fr] sm:grid-cols-[150px_1fr]">
-          <div className="space-y-1.5 border-r bg-sidebar p-3">
-            <div className="mb-3 flex items-center gap-1.5">
-              <BrandMark size={18} />
-              <span className="text-xs font-bold">Noted</span>
-            </div>
-            <div className="mb-2 flex h-6 items-center gap-1 rounded-md bg-primary px-2 text-[0.6rem] font-semibold text-primary-foreground">
-              + New note
-            </div>
-            {['All Notes', 'Favorites', 'Reminders', 'Recent'].map((l, i) => (
-              <div
-                key={l}
-                className={cn(
-                  'rounded-md px-2 py-1 text-[0.65rem]',
-                  i === 0 ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground',
-                )}
-              >
-                {l}
-              </div>
-            ))}
-            <p className="px-2 pt-2 text-[0.55rem] font-semibold tracking-wider text-muted-foreground uppercase">
-              Folders
-            </p>
-            {[
-              ['School', 'var(--note-sky)'],
-              ['Work', 'var(--note-violet)'],
-              ['Personal', 'var(--note-rose)'],
-            ].map(([l, c]) => (
-              <div key={l} className="flex items-center gap-1.5 px-2 py-0.5 text-[0.65rem]">
-                <span className="size-2 rounded-sm" style={{ background: c }} />
-                {l}
-              </div>
-            ))}
-          </div>
-          <div data-note-color="sage" className="bg-background p-4 text-foreground sm:p-5">
-            <div className="mb-3 flex gap-1">
-              {['B', 'I', 'U', 'H1', '☑'].map((t) => (
-                <span
-                  key={t}
-                  className="grid h-5 min-w-5 place-items-center rounded border bg-card px-1 text-[0.55rem] font-semibold text-muted-foreground"
-                >
-                  {t}
-                </span>
-              ))}
-              <span className="ml-auto inline-flex h-5 items-center gap-1 rounded bg-primary px-1.5 text-[0.55rem] font-semibold text-primary-foreground">
-                <ScanText className="size-2.5" /> Scan
-              </span>
-            </div>
-            <p className="text-sm font-bold sm:text-base">Biology review ✏️</p>
-            <p className="mt-1 text-[0.6rem] text-muted-foreground">Edited just now</p>
-            <p className="mt-3 text-[0.7rem] leading-relaxed">
-              Photosynthesis turns light energy into chemical energy stored in glucose.
-            </p>
-            <div className="mt-3 space-y-1.5 text-[0.7rem]">
-              {[
-                ['Read chapter 4', true],
-                ['Summarize the diagrams', true],
-                ['Quiz on Friday', false],
-              ].map(([t, done]) => (
-                <div key={t as string} className="flex items-center gap-1.5">
-                  <span
-                    className={cn(
-                      'grid size-3 place-items-center rounded-[3px] border',
-                      done && 'border-primary bg-primary text-primary-foreground',
-                    )}
-                  >
-                    {done && <Check className="size-2" strokeWidth={4} />}
-                  </span>
-                  <span className={cn(done && 'text-muted-foreground line-through')}>{t}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 rounded-md border-l-2 border-primary bg-primary/5 px-2 py-1.5 text-[0.65rem] text-muted-foreground">
-              “Chlorophyll absorbs mostly blue and red light.”
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Floating chips */}
-      <div className="float-slow absolute -bottom-8 -left-3 flex items-center gap-2.5 rounded-xl border bg-card/95 p-2.5 pr-4 shadow-xl backdrop-blur sm:-left-8">
-        <span className="grid size-8 place-items-center rounded-lg bg-emerald-500 text-white">
-          <ScanText className="size-4" />
-        </span>
-        <span>
-          <span className="block text-xs font-semibold">Text detected</span>
-          <span className="block text-[0.65rem] text-muted-foreground">Added to your note</span>
-        </span>
-      </div>
-      <div
-        className="float-slow absolute -top-4 -right-2 flex items-center gap-2 rounded-xl border bg-card/95 p-2 pr-3 shadow-xl backdrop-blur sm:-right-6"
-        style={{ animationDelay: '-3s' }}
-      >
-        <span className="grid size-7 place-items-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
-          <BellRing className="size-3.5" />
-        </span>
-        <span className="text-[0.7rem] font-medium">Quiz · Fri 8:00 AM</span>
-      </div>
-    </div>
-  );
-}
-
 export function WelcomePage() {
   const { user, configured } = useAuth();
   const navigate = useNavigate();
   if (user) return <Navigate to="/notes" replace />;
 
-  const continueAsGuest = () => {
+  function continueAsGuest() {
     guestMode.choose();
     navigate('/notes?dashboard=1');
-  };
+  }
 
   return (
-    <div className="relative min-h-full overflow-x-hidden bg-background">
-      {/* Background */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 left-1/2 h-[560px] w-[900px] -translate-x-1/2 rounded-full bg-primary/15 blur-[120px] dark:bg-primary/20" />
-        <div className="absolute top-[30%] -right-40 h-[420px] w-[420px] rounded-full bg-violet-500/10 blur-[110px]" />
-        <div
-          className="absolute inset-0 opacity-[0.35] dark:opacity-[0.25]"
-          style={{
-            backgroundImage:
-              'linear-gradient(to right, color-mix(in oklab, var(--border) 70%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--border) 70%, transparent) 1px, transparent 1px)',
-            backgroundSize: '44px 44px',
-            maskImage: 'radial-gradient(ellipse 70% 55% at 50% 0%, #000 40%, transparent 100%)',
-            WebkitMaskImage:
-              'radial-gradient(ellipse 70% 55% at 50% 0%, #000 40%, transparent 100%)',
-          }}
-        />
-      </div>
-
-      <header className="relative z-10 mx-auto flex h-16 max-w-6xl items-center justify-between px-5 sm:px-8">
-        <BrandLockup size={30} />
-        <ThemeToggle />
+    <div className="noted-welcome min-h-full bg-background">
+      <header className="mx-auto flex h-[4.75rem] max-w-[78rem] items-center justify-between border-b px-5 sm:px-8">
+        <BrandLockup size={32} />
+        <div className="flex items-center gap-2">
+          {!isDesktopApp() && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="hidden sm:inline-flex"
+              onClick={openDownloadDialog}
+            >
+              <MonitorDown /> Download Noted
+            </Button>
+          )}
+          <ThemeToggle />
+        </div>
       </header>
 
-      <main className="relative z-10">
-        {/* Hero */}
-        <section className="mx-auto grid max-w-6xl items-center gap-14 px-5 pt-8 pb-20 sm:px-8 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
-          <div className="text-center lg:text-left">
-            <span className="inline-flex items-center gap-2 rounded-full border bg-card/70 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
-              Free · Private · Works offline
-            </span>
-            <h1 className="mt-6 text-4xl leading-[1.05] font-bold tracking-tight text-balance sm:text-5xl lg:text-6xl">
-              {isDesktopApp() ? (
-                <>
-                  Welcome to{' '}
-                  <span className="bg-gradient-to-r from-primary via-blue-500 to-violet-500 bg-clip-text text-transparent">
-                    Noted
-                  </span>
-                </>
-              ) : (
-                <>
-                  Your thoughts,{' '}
-                  <span className="bg-gradient-to-r from-primary via-blue-500 to-violet-500 bg-clip-text text-transparent">
-                    instantly noted.
-                  </span>
-                </>
-              )}
+      <main className="mx-auto max-w-[78rem] px-5 sm:px-8">
+        <section className="noted-welcome-hero grid items-center gap-8 py-10 sm:py-16 lg:grid-cols-[1fr_.84fr] lg:gap-16 lg:py-24">
+          <div className="min-w-0">
+            <h1 className="max-w-[12ch] text-[clamp(2.55rem,5.6vw,5rem)] leading-[1.01] font-[730] tracking-[-.065em] text-balance">
+              A place for what you want to keep.
             </h1>
-            <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-pretty text-muted-foreground sm:text-lg lg:mx-0">
-              A fast, beautiful notepad. Start writing right away — scan text with your camera,
-              color-code your notes, and create a free account only if you want them on every
-              device.
+            <p className="mt-5 max-w-md text-[clamp(.98rem,2vw,1.12rem)] leading-relaxed text-muted-foreground">
+              Write a note, make a checklist, or capture something from your camera or microphone.
+              Noted saves as you go.
             </p>
-
-            <div className="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row lg:mx-0">
-              <Button
-                size="lg"
-                onClick={continueAsGuest}
-                className="group h-12 rounded-xl sm:flex-1 text-[0.95rem] shadow-lg shadow-primary/30"
-              >
-                <NotebookPen aria-hidden="true" /> Continue as Guest
-                <ArrowRight
-                  className="transition-transform group-hover:translate-x-0.5"
-                  aria-hidden="true"
-                />
+            <div className="mt-7 flex flex-wrap items-center gap-2.5">
+              <Button size="lg" className="h-11 rounded-lg px-4" onClick={continueAsGuest}>
+                <PenLine aria-hidden="true" /> Continue as Guest <ArrowRight aria-hidden="true" />
               </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="h-12 rounded-xl sm:flex-1 bg-card/70 text-[0.95rem] backdrop-blur"
-                asChild
-              >
-                <Link to="/register">Create an Account</Link>
+              <Button size="lg" variant="outline" className="h-11 rounded-lg" asChild>
+                <Link to="/login">Log In</Link>
               </Button>
             </div>
             <p className="mt-4 text-sm text-muted-foreground">
-              Already have an account?{' '}
-              <Link to="/login" className="font-semibold text-primary hover:underline">
-                Log In
+              Want to sync across devices?{' '}
+              <Link
+                to="/register"
+                className="font-semibold text-primary underline-offset-4 hover:underline"
+              >
+                Create an Account
               </Link>
             </p>
-            {!isDesktopApp() && (
-              <button
-                type="button"
-                onClick={openDownloadDialog}
-                className="group mt-5 inline-flex h-11 items-center gap-2.5 rounded-xl border border-primary/35 bg-primary/[0.07] px-4 text-sm font-semibold text-primary shadow-sm transition-colors hover:border-primary/60 hover:bg-primary/[0.12] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none dark:border-primary/45 dark:bg-primary/15 dark:hover:bg-primary/25"
-              >
-                <MonitorDown className="size-[18px]" aria-hidden="true" />
-                Download Noted for Android, Windows &amp; macOS
-                <ArrowRight
-                  className="size-4 transition-transform group-hover:translate-x-0.5"
-                  aria-hidden="true"
-                />
-              </button>
-            )}
-
-            <div className="mx-auto mt-8 grid max-w-md gap-2.5 text-left text-sm sm:grid-cols-2 lg:mx-0">
-              <div className="flex gap-3 rounded-xl border bg-card/60 p-3 backdrop-blur">
-                <HardDrive className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-                <span>
-                  <strong className="font-semibold">Guest mode</strong>
-                  <span className="block text-xs leading-relaxed text-muted-foreground">
-                    Notes stay in this browser. Clearing site data removes them.
-                  </span>
-                </span>
-              </div>
-              <div className="flex gap-3 rounded-xl border bg-card/60 p-3 backdrop-blur">
-                <Cloud className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
-                <span>
-                  <strong className="font-semibold">Free account</strong>
-                  <span className="block text-xs leading-relaxed text-muted-foreground">
-                    Private cloud sync across your computer and phone.
-                  </span>
-                </span>
-              </div>
-            </div>
             {!configured && (
-              <p className="mx-auto mt-4 flex max-w-md items-start gap-2 text-left text-xs leading-relaxed text-muted-foreground lg:mx-0">
-                <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-                Cloud accounts aren’t configured for this deployment yet. You can keep using Noted
-                as a guest — your notes are saved on this device.
-              </p>
+              <div className="mt-4 max-w-md text-sm">
+                <NotConfigured />
+              </div>
             )}
           </div>
 
-          <AppPreview />
+          <div className="noted-welcome-mark hidden lg:grid" aria-hidden="true">
+            <div className="noted-welcome-paper">
+              <BrandMark size={124} />
+            </div>
+          </div>
         </section>
 
-        {/* Features */}
-        <section className="border-t bg-muted/30" aria-labelledby="features-h">
-          <div className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
-            <div className="mx-auto max-w-2xl text-center">
-              <p className="text-xs font-semibold tracking-widest text-primary uppercase">
-                Everything you need
-              </p>
-              <h2
-                id="features-h"
-                className="mt-3 text-3xl font-bold tracking-tight text-balance sm:text-4xl"
-              >
-                Capture anything. Find it in seconds.
-              </h2>
-              <p className="mt-4 text-muted-foreground">
-                Noted keeps the essentials simple and puts powerful tools one tap away.
+        <section
+          aria-label="Using Noted"
+          className="grid gap-5 border-t py-7 text-sm sm:grid-cols-2 lg:grid-cols-3"
+        >
+          <div className="flex items-start gap-3">
+            <HardDrive className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+            <div>
+              <h2 className="font-semibold">Guest mode</h2>
+              <p className="mt-1 leading-relaxed text-muted-foreground">
+                Works offline. Notes stay on this device. Clearing site data removes guest notes
+                from this browser.
               </p>
             </div>
-            <ul className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {FEATURES.map(({ icon: Icon, title, body, tone }) => (
-                <li
-                  key={title}
-                  className="group rounded-2xl border bg-card p-6 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/5"
+          </div>
+          <div className="flex items-start gap-3">
+            <Cloud className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+            <div>
+              <h2 className="font-semibold">Cloud account</h2>
+              <p className="mt-1 leading-relaxed text-muted-foreground">
+                Sign in to sync your notes across your computer and phone.
+              </p>
+            </div>
+          </div>
+          {!isDesktopApp() && (
+            <div className="flex items-start gap-3">
+              <MonitorDown className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+              <div>
+                <button
+                  type="button"
+                  className="font-semibold hover:underline"
+                  onClick={openDownloadDialog}
                 >
-                  <span
-                    className={cn(
-                      'grid size-11 place-items-center rounded-xl bg-gradient-to-br to-transparent',
-                      tone,
-                    )}
-                  >
-                    <Icon className="size-5" aria-hidden="true" />
-                  </span>
-                  <h3 className="mt-4 font-semibold">{title}</h3>
-                  <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{body}</p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        {/* Final CTA */}
-        <section className="mx-auto max-w-6xl px-5 py-20 sm:px-8">
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-blue-600 to-violet-600 px-6 py-14 text-center text-white shadow-2xl shadow-primary/25 sm:px-12">
-            <div
-              aria-hidden="true"
-              className="absolute -top-24 -right-24 size-72 rounded-full bg-white/10 blur-2xl"
-            />
-            <BrandMark size={56} className="mx-auto drop-shadow-lg" />
-            <h2 className="mt-5 text-3xl font-bold tracking-tight text-balance sm:text-4xl">
-              Start writing in one click.
-            </h2>
-            <p className="mx-auto mt-3 max-w-md text-white/80">
-              No sign-up needed. Your first note is a tap away.
-            </p>
-            <Button
-              size="lg"
-              onClick={continueAsGuest}
-              className="mt-8 h-12 rounded-xl bg-white px-6 text-[0.95rem] text-blue-700 shadow-lg hover:bg-white/90"
-            >
-              <Sparkles aria-hidden="true" /> Start writing now
-            </Button>
-          </div>
+                  Download Noted for Android, Windows &amp; macOS
+                </button>
+                <p className="mt-1 leading-relaxed text-muted-foreground">
+                  Open the download options for your device.
+                </p>
+              </div>
+            </div>
+          )}
         </section>
       </main>
-
-      <footer className="relative z-10 border-t">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-5 py-6 text-xs text-muted-foreground sm:flex-row sm:px-8">
-          <BrandLockup size={20} />
-          <span className="inline-flex items-center gap-1.5">
-            <LockKeyhole className="size-3.5" aria-hidden="true" />
-            Your notes are private to you.
-          </span>
-        </div>
-      </footer>
     </div>
   );
 }
@@ -439,6 +169,7 @@ export function WelcomePage() {
 // Login
 // ---------------------------------------------------------------------------
 export function LoginPage() {
+  const emailCooldown = useEmailCooldown();
   const { signIn, user, configured, resendConfirmation } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -535,6 +266,38 @@ export function LoginPage() {
           </div>
           <Button type="submit" className="w-full" disabled={busy}>
             {busy && <Spinner />} Log in
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            disabled={busy || emailCooldown.seconds > 0}
+            onClick={async () => {
+              if (busy || emailCooldown.seconds > 0) return;
+              setError(null);
+              setNotice(null);
+              if (emailField.validate()) return;
+              setBusy(true);
+              emailCooldown.start();
+              try {
+                postAuthNext.set(next);
+                await requestEmailSignIn(
+                  email,
+                  `${siteUrl()}/auth/callback?next=${encodeURIComponent(next)}`,
+                );
+                setNotice(
+                  'A fresh sign-in email was requested for this existing account. Open only the newest link. It can be used once; no password is required.',
+                );
+              } catch (error) {
+                setError(authErrorMessage(error));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {emailCooldown.seconds > 0
+              ? `Request another email in ${emailCooldown.seconds}s`
+              : 'Email me a sign-in link'}
           </Button>
         </form>
       )}
@@ -655,7 +418,8 @@ export function RegisterPage() {
 // Forgot password
 // ---------------------------------------------------------------------------
 export function ForgotPasswordPage() {
-  const { sendPasswordReset, configured } = useAuth();
+  const { sendPasswordReset, configured, user } = useAuth();
+  const emailCooldown = useEmailCooldown();
   const emailField = useGmailField();
   const email = normalizeGmail(emailField.value);
   const [sent, setSent] = useState(false);
@@ -664,9 +428,11 @@ export function ForgotPasswordPage() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (busy || emailCooldown.seconds > 0) return;
     setError(null);
     if (emailField.validate()) return;
     setBusy(true);
+    emailCooldown.start();
     try {
       await sendPasswordReset(email);
       setSent(true);
@@ -680,7 +446,11 @@ export function ForgotPasswordPage() {
   return (
     <AuthLayout
       title="Reset your password"
-      subtitle="We’ll email you a secure link to choose a new password."
+      subtitle={
+        user
+          ? 'Use your signed-in account to choose a new password.'
+          : 'We’ll email you a secure link to choose a new password.'
+      }
       footer={
         <Link className="font-medium text-primary hover:underline" to="/login">
           Back to log in
@@ -689,6 +459,13 @@ export function ForgotPasswordPage() {
     >
       {!configured ? (
         <NotConfigured />
+      ) : user ? (
+        <div className="space-y-4">
+          <p className="text-sm">Signed in as {user.email}. No new email is needed.</p>
+          <Button className="w-full" asChild>
+            <Link to="/reset-password">Choose a new password</Link>
+          </Button>
+        </div>
       ) : sent ? (
         // Same message whether or not the account exists (prevents account enumeration).
         <Alert tone="success">
@@ -699,9 +476,18 @@ export function ForgotPasswordPage() {
         <form onSubmit={submit} className="space-y-4" noValidate>
           {error && <Alert tone="error">{error}</Alert>}
           <GmailField field={emailField} autoFocus />
-          <Button type="submit" className="w-full" disabled={busy}>
-            {busy && <Spinner />} Send reset link
+          <Button type="submit" className="w-full" disabled={busy || emailCooldown.seconds > 0}>
+            {busy && <Spinner />}
+            {emailCooldown.seconds > 0
+              ? `Request another email in ${emailCooldown.seconds}s`
+              : 'Send reset link'}
           </Button>
+          {emailCooldown.seconds > 0 && (
+            <p role="status" className="text-sm text-muted-foreground">
+              Please wait before requesting another email. The email delivery limit may last longer
+              than this countdown.
+            </p>
+          )}
         </form>
       )}
     </AuthLayout>
@@ -772,9 +558,22 @@ export function ResetPasswordPage() {
 export function AuthCallbackPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const [confirmation] = useState(() => emailConfirmationFromUrl(new URL(window.location.href)));
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
+    if (confirmation) {
+      // Do not consume a one-time token during a GET, preview, or effect replay.
+      // Keep it only in component memory until the person explicitly confirms.
+      const clean = new URL(window.location.href);
+      clean.hash = '';
+      clean.searchParams.delete('token_hash');
+      clean.searchParams.delete('type');
+      window.history.replaceState(window.history.state, '', clean.pathname + clean.search);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const urlError = params.get('error_description') || params.get('error');
@@ -786,19 +585,22 @@ export function AuthCallbackPage() {
         setError('Cloud accounts are not configured.');
         return;
       }
-      const code = params.get('code');
-      // detectSessionInUrl usually exchanges the code already; do it explicitly if not.
-      let { data } = await supabase.auth.getSession();
-      if (!data.session && code) {
-        const res = await supabase.auth.exchangeCodeForSession(code);
-        if (res.error) {
-          if (!cancelled) setError('This link is invalid or has expired. Please try again.');
-          return;
-        }
-        data = { session: res.data.session };
+      let session;
+      try {
+        session = await completeAuthCallback(supabase, new URL(window.location.href), () => {
+          window.history.replaceState(
+            window.history.state,
+            '',
+            window.location.pathname + window.location.search,
+          );
+        });
+      } catch {
+        if (!cancelled)
+          setError('This link is invalid or has expired. Please request a fresh sign-in email.');
+        return;
       }
       if (cancelled) return;
-      if (!data.session) {
+      if (!session) {
         setError('We could not sign you in from this link. Please log in.');
         return;
       }
@@ -808,14 +610,51 @@ export function AuthCallbackPage() {
     return () => {
       cancelled = true;
     };
-  }, [params, navigate]);
+  }, [params, navigate, confirmation]);
 
   if (error) {
     return (
       <AuthLayout title="Couldn’t complete sign-in">
         <Alert tone="error">{error}</Alert>
+        {user && (
+          <>
+            <p className="mt-4 text-sm">Already signed in as {user.email}.</p>
+            <Button className="mt-4 w-full" asChild>
+              <Link to={sanitizeNext(params.get('next'))}>Continue with this account</Link>
+            </Button>
+          </>
+        )}
         <Button className="mt-4 w-full" asChild>
-          <Link to="/login">Go to log in</Link>
+          <Link to={`/login?next=${encodeURIComponent(sanitizeNext(params.get('next')))}`}>
+            Go to log in
+          </Link>
+        </Button>
+      </AuthLayout>
+    );
+  }
+  if (confirmation) {
+    return (
+      <AuthLayout title="Confirm your sign-in">
+        <p className="text-sm text-muted-foreground">
+          Continue only if you requested this sign-in email for your Noted account.
+        </p>
+        <Button
+          className="mt-4 w-full"
+          disabled={confirming}
+          onClick={async () => {
+            if (!supabase || confirming) return;
+            setConfirming(true);
+            try {
+              await confirmEmailSignIn(supabase, confirmation);
+              navigate(sanitizeNext(params.get('next') ?? postAuthNext.take()), { replace: true });
+            } catch {
+              setError('This sign-in link has expired or was already used. Request a fresh email.');
+            } finally {
+              setConfirming(false);
+            }
+          }}
+        >
+          {confirming && <Spinner />} Confirm sign-in
         </Button>
       </AuthLayout>
     );

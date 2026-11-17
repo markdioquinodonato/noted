@@ -26,6 +26,7 @@ import { Alert } from '@/components/common';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { postAuthNext } from '@/lib/mode';
 import type { RefObject } from 'react';
+import { TranscriptPanel } from '@/features/transcription/TranscriptPanel';
 
 type Tool = 'reminder' | 'attachments' | 'voice' | 'links' | 'sharing' | null;
 export function ProductivityTools({
@@ -33,13 +34,20 @@ export function ProductivityTools({
   disabled,
   bodyRef,
   update,
+  ensureCreated,
+  initialTool = null,
+  returnFocus,
 }: {
   note: Note;
   disabled: boolean;
   bodyRef: RefObject<RichEditorHandle | null>;
   update(patch: NoteDraft): Promise<boolean>;
+  ensureCreated(): Promise<void>;
+  initialTool?: Tool;
+  returnFocus?: () => void;
 }) {
-  const [tool, setTool] = useState<Tool>(null);
+  const [tool, setTool] = useState<Tool>(initialTool);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const { repo } = useRepo();
   // Sharing needs a signed-in cloud account; guest notes live only on this device.
   const guest = repo.kind !== 'cloud';
@@ -51,6 +59,15 @@ export function ProductivityTools({
     ['links', 'Linked notes', Link2],
     ['sharing', 'Share', Users],
   ] as const;
+  const restoreTriggerFocus = (event: Event) => {
+    if (triggerRef.current?.isConnected && !triggerRef.current.disabled) {
+      event.preventDefault();
+      triggerRef.current.focus();
+    } else if (returnFocus) {
+      event.preventDefault();
+      returnFocus();
+    }
+  };
   return (
     <>
       {tools
@@ -61,8 +78,12 @@ export function ProductivityTools({
             size="xs"
             variant="ghost"
             disabled={disabled}
+            aria-haspopup="dialog"
             title={key === 'sharing' && guest ? 'Log in to share notes' : undefined}
-            onClick={() => setTool(key)}
+            onClick={(event) => {
+              triggerRef.current = event.currentTarget;
+              setTool(key);
+            }}
           >
             <Icon />
             {label}
@@ -75,11 +96,14 @@ export function ProductivityTools({
         }}
       >
         {tool === 'sharing' && guest ? (
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md" onCloseAutoFocus={restoreTriggerFocus}>
             <ShareLoginPrompt onClose={() => setTool(null)} />
           </DialogContent>
         ) : (
-          <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
+          <DialogContent
+            onCloseAutoFocus={restoreTriggerFocus}
+            className={`max-h-[85dvh] overflow-y-auto ${tool === 'voice' ? 'sm:max-w-4xl' : 'sm:max-w-xl'}`}
+          >
             <DialogHeader>
               <DialogTitle>{tools.find((t) => t[0] === tool)?.[1]}</DialogTitle>
               <DialogDescription>
@@ -88,11 +112,17 @@ export function ProductivityTools({
             </DialogHeader>
             {tool === 'reminder' && <ReminderPanel note={note} update={update} />}
             {tool === 'attachments' && (
-              <AttachmentPanel noteId={note.id} onRecordVoice={() => setTool('voice')} />
+              <AttachmentPanel
+                noteId={note.id}
+                ensureCreated={ensureCreated}
+                onRecordVoice={() => setTool('voice')}
+              />
             )}
-            {tool === 'voice' && <VoicePanel noteId={note.id} bodyRef={bodyRef} />}
+            {tool === 'voice' && (
+              <VoicePanel noteId={note.id} bodyRef={bodyRef} ensureCreated={ensureCreated} />
+            )}
             {tool === 'links' && <LinkPanel noteId={note.id} bodyRef={bodyRef} />}
-            {tool === 'sharing' && <SharingPanel noteId={note.id} />}
+            {tool === 'sharing' && <SharingPanel noteId={note.id} ensureCreated={ensureCreated} />}
           </DialogContent>
         )}
       </Dialog>
@@ -204,9 +234,11 @@ interface SpeechApi {
 function VoicePanel({
   noteId,
   bodyRef,
+  ensureCreated,
 }: {
   noteId: string;
   bodyRef: RefObject<RichEditorHandle | null>;
+  ensureCreated(): Promise<void>;
 }) {
   const { repo } = useRepo();
   const recorder = useRef<MediaRecorder | null>(null);
@@ -358,6 +390,7 @@ function VoicePanel({
               try {
                 const mime = recording!.type,
                   ext = mime === 'audio/mp4' ? 'm4a' : mime.split('/')[1];
+                await ensureCreated();
                 await uploadAttachment(
                   repo,
                   noteId,
@@ -377,6 +410,13 @@ function VoicePanel({
           </Button>
         </>
       )}
+      <TranscriptPanel
+        key={noteId}
+        noteId={noteId}
+        recording={recording}
+        bodyRef={bodyRef}
+        ensureCreated={ensureCreated}
+      />
       <div className="border-t pt-3">
         <Button
           variant="outline"
@@ -511,7 +551,13 @@ function LinkPanel({
   );
 }
 
-function SharingPanel({ noteId }: { noteId: string }) {
+function SharingPanel({
+  noteId,
+  ensureCreated,
+}: {
+  noteId: string;
+  ensureCreated(): Promise<void>;
+}) {
   const { repo } = useRepo();
   const refresh = useRefreshLists();
   const emailField = useGmailField();
@@ -554,6 +600,7 @@ function SharingPanel({ noteId }: { noteId: string }) {
           if (emailField.validate()) return;
           setBusy(true);
           try {
+            await ensureCreated();
             const { error } = await supabase!.rpc('share_note', {
               p_note_id: noteId,
               p_email: email,

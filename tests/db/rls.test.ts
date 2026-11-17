@@ -88,6 +88,7 @@ describe('bootstrap', () => {
         'note_shares',
         'attachments',
         'notifications',
+        'transcription_chunks',
       ].sort(),
     );
     for (const r of rows) expect(r.relrowsecurity, r.relname).toBe(true);

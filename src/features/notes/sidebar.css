@@ -1,0 +1,28 @@
+.noted-sidebar-collapsed .noted-sidebar-brand {
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 0.65rem;
+  padding: 1rem 0 0.7rem;
+}
+
+.noted-sidebar-collapsed .noted-sidebar-body {
+  padding-inline: 0.55rem;
+}
+
+.noted-sidebar-collapsed .noted-nav-item {
+  position: relative;
+  display: grid;
+  min-height: 2.75rem;
+  place-items: center;
+}
+
+.noted-sidebar-collapsed .noted-sidebar-organization {
+  margin-block-start: 0.75rem;
+  padding-block-start: 0.65rem;
+}
+
+.noted-sidebar.noted-sidebar-collection {
+  max-height: min(25rem, var(--radix-popover-content-available-height));
+  background: var(--popover);
+  color: var(--popover-foreground);
+}

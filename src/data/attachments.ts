@@ -53,10 +53,23 @@ export async function listAttachments(
   repo: NotesRepository,
   noteId: string,
 ): Promise<Attachment[]> {
-  if (repo.kind === 'local')
-    return ((await (await assetDb()).getAll('files')) as LocalAttachment[]).filter(
-      (f) => f.scope === repo.scope && f.note_id === noteId,
-    );
+  if (repo.kind === 'local') {
+    const db = await assetDb();
+    try {
+      const files: Attachment[] = [];
+      const tx = db.transaction('files');
+      let cursor = await tx.store.openCursor();
+      while (cursor) {
+        const { scope, blob: _blob, ...file } = cursor.value as LocalAttachment;
+        if (scope === repo.scope && file.note_id === noteId) files.push(file);
+        cursor = await cursor.continue();
+      }
+      await tx.done;
+      return files;
+    } finally {
+      db.close();
+    }
+  }
   const { data, error } = await supabase!
     .from('attachments')
     .select('*')
@@ -108,9 +121,14 @@ export async function uploadAttachment(
 }
 export async function attachmentBlob(repo: NotesRepository, file: Attachment): Promise<Blob> {
   if (repo.kind === 'local') {
-    const record = (await (await assetDb()).get('files', file.id)) as LocalAttachment | undefined;
-    if (!record || record.scope !== repo.scope) throw new Error('File not found.');
-    return record.blob;
+    const db = await assetDb();
+    try {
+      const record = (await db.get('files', file.id)) as LocalAttachment | undefined;
+      if (!record || record.scope !== repo.scope) throw new Error('File not found.');
+      return record.blob;
+    } finally {
+      db.close();
+    }
   }
   const { data, error } = await supabase!.storage.from('note-attachments').download(file.path);
   if (error || !data) throw new Error('Could not download the private attachment.');

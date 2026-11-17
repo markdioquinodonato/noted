@@ -1,0 +1,276 @@
+.noted-focus {
+  --focus-paper: var(--editor);
+  --focus-desk: color-mix(in oklab, var(--workspace-surface, var(--background)) 90%, var(--border));
+  --focus-width: 51rem;
+  --focus-gutter: clamp(1rem, 3vw, 2.5rem);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-block-size: 0;
+  block-size: 100%;
+  background: var(--focus-desk);
+  color: var(--foreground);
+}
+
+.noted-focus:focus {
+  outline: none;
+}
+
+.noted-focus-header,
+.noted-focus-footer {
+  flex: none;
+  background: var(--focus-paper);
+}
+
+.noted-focus-header {
+  border-block-end: 1px solid var(--border);
+}
+
+.noted-focus-toolbar,
+.noted-focus-footer-inner {
+  display: flex;
+  align-items: center;
+  width: min(100%, calc(var(--focus-width) + var(--focus-gutter) * 2));
+  margin-inline: auto;
+  padding-inline: var(--focus-gutter);
+}
+
+.noted-focus-toolbar {
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-block-size: 3.75rem;
+}
+
+.noted-focus-brand,
+.noted-focus-actions {
+  display: flex;
+  align-items: center;
+}
+
+.noted-focus-brand {
+  gap: 0.55rem;
+  font-size: 1.06rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.noted-focus-actions {
+  gap: 0.225rem;
+}
+
+.noted-focus-actions > button:not(.noted-focus-done) {
+  min-block-size: 2.5rem;
+  border-radius: 0.65rem;
+}
+
+.noted-focus .noted-focus-done {
+  min-height: 2.5rem;
+  margin-inline-start: 0.4rem;
+  border-color: color-mix(in oklab, var(--primary) 24%, var(--border));
+  border-radius: 0.65rem;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  box-shadow: none;
+  font-weight: 650;
+}
+
+.noted-focus .noted-focus-done:hover {
+  background: color-mix(in oklab, var(--primary) 13%, var(--accent));
+}
+
+.noted-focus-scroll {
+  position: relative;
+  flex: 1;
+  min-block-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(1rem, 3dvh, 1.75rem) var(--focus-gutter);
+}
+
+.noted-focus-sheet {
+  position: relative;
+  width: min(100%, var(--focus-width));
+  margin-inline: auto;
+  padding: clamp(1.35rem, 3vw, 2.5rem) clamp(1.35rem, 4vw, 3.5rem);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--focus-paper);
+  box-shadow:
+    0 1rem 3rem -1.75rem rgb(16 35 59 / 30%),
+    0 1px 4px rgb(16 35 59 / 5%);
+}
+
+.dark .noted-focus-sheet {
+  box-shadow: 0 1rem 3rem -1.75rem rgb(0 0 0 / 42%);
+}
+
+.noted-focus[data-immersive='true'] {
+  --focus-width: 56rem;
+}
+
+.noted-focus[data-immersive='true'] .noted-focus-scroll {
+  background: var(--focus-paper);
+}
+
+.noted-focus[data-immersive='true'] .noted-focus-sheet {
+  min-block-size: 100%;
+  border: 0;
+  box-shadow: none;
+}
+
+.noted-focus-title {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-block-end: clamp(0.65rem, 1.6vw, 1.05rem);
+  padding: 0 0 0.2rem;
+  overflow: hidden;
+  resize: none;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--foreground);
+  font-size: calc(clamp(1.5rem, 1.2rem + 0.85vw, 2.0625rem) * var(--font-scale, 1));
+  font-weight: 700;
+  line-height: 1.17;
+  letter-spacing: -0.044em;
+}
+
+.noted-focus-title::placeholder {
+  color: var(--muted-foreground);
+}
+
+.noted-focus-sheet :is(.noted-focus-title, .noted-prose):focus-visible {
+  outline: none;
+  box-shadow: -3px 0 var(--primary);
+}
+
+.noted-focus .noted-prose {
+  min-block-size: clamp(8rem, 19dvh, 11rem);
+  padding-block-end: 0.5rem;
+  border-radius: 0.2rem;
+  caret-color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.noted-focus[data-immersive='true'] .noted-prose {
+  min-block-size: 42dvh;
+}
+
+.noted-focus .noted-prose:focus-visible {
+  box-shadow: -2px 0 color-mix(in oklab, var(--primary) 55%, var(--focus-paper));
+}
+
+.noted-focus-tools:not([hidden]) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: none;
+  gap: 0.35rem;
+  inline-size: min(calc(100% - var(--focus-gutter) * 2), var(--focus-width));
+  max-block-size: min(34dvh, 15rem);
+  margin: 0.85rem auto 0;
+  padding: 0.55rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--focus-paper);
+}
+
+.noted-focus-tools button {
+  min-block-size: 2.1rem;
+}
+
+.noted-focus .noted-formatting {
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--focus-paper);
+  box-shadow: 0 4px 14px -10px rgb(16 35 59 / 40%);
+}
+
+.noted-focus-footer {
+  border-block-start: 1px solid var(--border);
+  padding-block-end: env(safe-area-inset-bottom);
+}
+
+.noted-focus-footer-inner {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  min-block-size: 2.65rem;
+  padding-block: 0.35rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.noted-focus-save,
+.noted-focus-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-inline-size: 100%;
+}
+
+.noted-focus-details {
+  flex-wrap: wrap;
+  gap: 0.25rem 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .noted-focus {
+    --focus-gutter: 0.9rem;
+  }
+
+  .noted-focus-toolbar {
+    gap: 0.5rem;
+    min-block-size: 3.5rem;
+  }
+
+  .noted-focus-actions {
+    gap: 0.125rem;
+  }
+
+  .noted-focus-actions > button:not(.noted-focus-done),
+  .noted-focus .noted-focus-done {
+    min-block-size: 2.75rem;
+    min-inline-size: 2.75rem;
+  }
+
+  .noted-focus .noted-focus-done {
+    margin-inline-start: 0.25rem;
+  }
+
+  .noted-focus-scroll {
+    padding: 0;
+    background: var(--focus-paper);
+  }
+
+  .noted-focus-sheet {
+    padding: 1.35rem 1.25rem;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .noted-focus-tools:not([hidden]) {
+    margin-block: 0.5rem;
+  }
+
+  .noted-focus .noted-formatting-actions > span[aria-hidden='true'] {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .noted-focus-brand > span {
+    display: none;
+  }
+}
+
+@media (max-width: 375px) {
+  .noted-focus-actions > button:is([aria-label='Format text'], [aria-label='Note tools']) > span {
+    display: none;
+  }
+}

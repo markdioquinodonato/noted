@@ -43,7 +43,7 @@ export function FolderPicker({
               aria-label={`Folder: ${current?.name ?? 'Uncategorized'}`}
             >
               {current ? <FolderIcon /> : <FolderInput />}
-              <span className="truncate">{current?.name ?? 'No folder'}</span>
+              <span className="noted-folder-label truncate">{current?.name ?? 'No folder'}</span>
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

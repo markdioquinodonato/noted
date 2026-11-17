@@ -56,6 +56,36 @@ export const supabase: SupabaseClient | null = configured()
   : null;
 export const isCloudConfigured = !!supabase;
 
+/** Email links must also work when the email opens a different browser/device.
+ * Use an isolated, non-persistent request client so no PKCE verifier is attached.
+ * The main client still uses PKCE for signup and validates the returned
+ * email fragment through setSession. No administrator/MFA guard is relaxed.
+ */
+function emailRequestClient() {
+  if (!isCloudConfigured) throw new Error('Cloud accounts are not configured.');
+  return createClient(url!, key!, {
+    auth: {
+      flowType: 'implicit',
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: 'noted-email-request',
+    },
+  });
+}
+export async function requestEmailSignIn(email: string, redirectTo: string) {
+  const { error } = await emailRequestClient().auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
+  });
+  if (error) throw error;
+}
+
+export async function requestPasswordRecovery(email: string, redirectTo: string) {
+  const { error } = await emailRequestClient().auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw error;
+}
+
 export function siteUrl(): string {
   const configuredUrl = (import.meta.env.VITE_SITE_URL as string | undefined)?.trim();
   const origin =

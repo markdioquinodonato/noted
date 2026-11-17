@@ -1,13 +1,11 @@
 import { readBrowserValue, writeBrowserValue } from '@/lib/browserStorage';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CloudOff, CloudUpload, X, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react';
+import { CloudOff, CloudUpload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { BrandMark } from '@/components/BrandLogo';
 import { cn } from '@/lib/utils';
 import { useRepo } from '@/app/RepositoryProvider';
 import { useAuth } from '@/features/auth/AuthProvider';
@@ -15,8 +13,7 @@ import { drafts } from '@/data/drafts';
 import { requestPersistentStorage } from '@/data/local/idb';
 import { ConflictError, NotFoundError, type NoteSort, type NoteView } from '@/domain/types';
 import { supabase } from '@/lib/supabase';
-import { guestMode } from '@/lib/mode';
-import { errorMessage, plural } from '@/lib/format';
+import { plural } from '@/lib/format';
 import {
   importLedgerKey,
   importRevisionsKey,
@@ -32,12 +29,23 @@ import {
   useRefreshLists,
   type ListFilters,
 } from './hooks';
+import { WorkspaceAnnouncements } from './WorkspaceAnnouncements';
 import { GuestStorageNotice } from './GuestStorageNotice';
-import { Dashboard } from './Dashboard';
+import { createCompositionNote, hasCompositionText, type NoteComposition } from './noteComposition';
+import { newId } from '@/lib/ids';
+import { AccountMenu } from '@/features/auth/AccountMenu';
+import './workspace.css';
 import { useReminderDelivery } from './reminders';
 import { Sidebar, useSidebarHost } from './Sidebar';
 import { NoteList } from './NoteList';
 import { NoteEditorContainer } from './NoteEditor';
+import { useSidebarPreference } from './workspacePreferences';
+
+interface WorkspaceLocationState {
+  toast?: string;
+  returnToLibrary?: boolean;
+  composition?: NoteComposition;
+}
 
 const VIEWS: NoteView[] = [
   'all',
@@ -78,7 +86,7 @@ function toParams(f: Omit<ListFilters, 'search'>): URLSearchParams {
 }
 
 /** Saves drafts left behind by closed editors (e.g. edited offline, then switched notes). */
-function useBackgroundDraftSync() {
+function useBackgroundDraftSync(openNoteId?: string) {
   const { repo } = useRepo();
   const refresh = useRefreshLists();
   const qc = useQueryClient();
@@ -90,18 +98,25 @@ function useBackgroundDraftSync() {
       const pending = await drafts.listForScope(repo.scope);
       let saved = 0;
       for (const d of pending) {
-        if (cancelled || activeSavers.has(d.noteId)) continue;
+        // The open editor owns its draft, even while its initial queries are pending.
+        if (cancelled || d.noteId === openNoteId || activeSavers.has(d.noteId)) continue;
         try {
-          await repo.updateNote(
-            d.noteId,
-            { title: d.title, content: d.content },
-            { expectedUpdatedAt: d.baseUpdatedAt },
-          );
+          const text = { title: d.title, content: d.content };
+          if (d.creation) {
+            if (!hasCompositionText(text)) {
+              await drafts.clear(repo.scope, d.noteId, d);
+              continue;
+            }
+            const note = await createCompositionNote(repo, d.creation, text);
+            qc.setQueryData(qk.note(repo.scope, d.noteId), note);
+          } else {
+            await repo.updateNote(d.noteId, text, { expectedUpdatedAt: d.baseUpdatedAt });
+          }
           await drafts.clear(repo.scope, d.noteId, d);
           void qc.invalidateQueries({ queryKey: qk.note(repo.scope, d.noteId) });
           saved++;
         } catch (e) {
-          if (e instanceof NotFoundError) await drafts.clear(repo.scope, d.noteId);
+          if (!d.creation && e instanceof NotFoundError) await drafts.clear(repo.scope, d.noteId);
           else if (
             e instanceof ConflictError &&
             e.latest &&
@@ -120,7 +135,7 @@ function useBackgroundDraftSync() {
     return () => {
       cancelled = true;
     };
-  }, [repo, online, refresh, qc]);
+  }, [repo, online, refresh, qc, openNoteId]);
 }
 
 function GuestImportBanner() {
@@ -179,25 +194,43 @@ export function Workspace() {
   const refresh = useRefreshLists();
   const online = useOnline();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const isTablet = useMediaQuery('(min-width: 768px)');
+
   const [navOpen, setNavOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(
-    () => readBrowserValue('noted:sidebar-collapsed') === '1',
-  );
-  const toggleSidebar = () =>
-    setCollapsed((value) => {
-      writeBrowserValue('noted:sidebar-collapsed', value ? '0' : '1');
-      return !value;
-    });
+  const { collapsed, setCollapsed } = useSidebarPreference();
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 250);
   const searchRef = useRef<HTMLInputElement>(null);
-  const creating = useRef(false);
+  const libraryRef = useRef<HTMLDivElement>(null);
+  const libraryFocus = useRef<HTMLElement | null>(null);
+  const libraryScrollTop = useRef(0);
+  const returningFromEditor = useRef(false);
+  const routeState = location.state as WorkspaceLocationState | null;
+  const composition = routeState?.composition;
+  const currentComposition =
+    composition?.scope === repo.scope && composition.noteId === noteId ? composition : undefined;
 
-  const base = parseFilters(sp);
+  useLayoutEffect(() => {
+    if (noteId) {
+      returningFromEditor.current = true;
+      return;
+    }
+    if (returningFromEditor.current) {
+      returningFromEditor.current = false;
+      const list = libraryRef.current?.querySelector<HTMLElement>('.noted-list-scroll');
+      if (list) list.scrollTop = libraryScrollTop.current;
+    }
+    if (libraryFocus.current) {
+      const target = libraryFocus.current;
+      libraryFocus.current = null;
+      if (libraryRef.current?.contains(target)) target.focus({ preventScroll: true });
+      else libraryRef.current?.querySelector<HTMLElement>('button.noted-capture')?.focus();
+    }
+  }, [noteId]);
+
+  const base = useMemo(() => parseFilters(sp), [sp]);
   const filters: ListFilters = { ...base, search: debouncedSearch };
 
-  useBackgroundDraftSync();
+  useBackgroundDraftSync(noteId);
   useReminderDelivery();
   useEffect(() => {
     if (repo.kind !== 'cloud' || !supabase) return;
@@ -216,10 +249,7 @@ export function Workspace() {
   }, [repo, refresh]);
 
   useEffect(() => {
-    if (!user) {
-      guestMode.choose();
-      void requestPersistentStorage();
-    }
+    if (!user) void requestPersistentStorage();
   }, [user]);
 
   useEffect(() => {
@@ -227,7 +257,7 @@ export function Workspace() {
     if (msg) toast.success(msg);
   }, [location.state]);
 
-  // Warn before leaving with unsaved edits; flush when the tab is hidden.
+  // Warn before leaving with unsaved edits. Flush editor changes when the tab is hidden.
   useEffect(() => {
     const beforeUnload = (e: BeforeUnloadEvent) => {
       if (anyUnsavedChanges()) {
@@ -248,50 +278,56 @@ export function Workspace() {
     };
   }, []);
 
-  const search_ = sp.toString() ? `?${sp.toString()}` : '';
-  const openNote = useCallback(
-    (id: string) => navigate({ pathname: `/notes/${id}`, search: search_ }),
-    [navigate, search_],
+  const librarySearch = location.search;
+  const openEditor = useCallback(
+    (id: string, draft?: NoteComposition) => {
+      if (!noteId && document.activeElement instanceof HTMLElement) {
+        libraryFocus.current = document.activeElement;
+      }
+      if (!noteId) {
+        const list = libraryRef.current?.querySelector<HTMLElement>('.noted-list-scroll');
+        if (list) libraryScrollTop.current = list.scrollTop;
+      }
+      setNavOpen(false);
+      void navigate(
+        { pathname: `/notes/${id}`, search: librarySearch },
+        {
+          state: { returnToLibrary: !noteId, composition: draft } satisfies WorkspaceLocationState,
+        },
+      );
+    },
+    [navigate, librarySearch, noteId],
   );
-  const closeNote = useCallback(
-    () => navigate({ pathname: '/notes', search: search_ }),
-    [navigate, search_],
-  );
+  const closeNote = useCallback(() => {
+    if (routeState?.returnToLibrary) void navigate(-1);
+    else void navigate({ pathname: '/notes', search: librarySearch }, { replace: true });
+  }, [navigate, librarySearch, routeState?.returnToLibrary]);
 
   const setFilters = (patch: Partial<ListFilters>) => {
     const next = { ...base, ...patch };
     setSp(toParams(next));
   };
 
-  const newNote = useCallback(async () => {
-    if (creating.current) return;
-    creating.current = true;
-    try {
-      const inSpecialView =
-        base.view === 'archive' || base.view === 'trash' || base.view === 'pinned';
-      const note = await repo.createNote({
-        folderId: base.folderId,
-        tagIds: base.tagId ? [base.tagId] : [],
-      });
-      qc.setQueryData(qk.note(repo.scope, note.id), note);
-      refresh();
-      const params = new URLSearchParams(inSpecialView ? toParams({ ...base, view: 'all' }) : sp);
-      params.delete('dashboard');
-      setSearch('');
-      navigate({
-        pathname: `/notes/${note.id}`,
-        search: params.toString() ? `?${params.toString()}` : '',
-      });
-    } catch (e) {
-      toast.error(errorMessage(e, 'Could not create a note.'));
-    } finally {
-      creating.current = false;
-    }
-  }, [repo, base, qc, refresh, navigate, sp]);
+  const openNewNote = useCallback(() => {
+    if (noteId) return;
+    const id = newId();
+    const draft: NoteComposition = {
+      noteId: id,
+      scope: repo.scope,
+      createdAt: new Date().toISOString(),
+      folderId: base.folderId,
+      tagIds: base.tagId ? [base.tagId] : [],
+    };
+    // This ID was generated here. Open the editor immediately without inserting a row.
+    qc.setQueryData(qk.note(repo.scope, id), null);
+    openEditor(id, draft);
+  }, [noteId, repo.scope, base.folderId, base.tagId, qc, openEditor]);
 
   // Keyboard shortcuts. Ctrl/Cmd+N is reserved by most browsers, so Alt+N is the reliable alternative.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (noteId || e.defaultPrevented || e.repeat) return;
+      if (document.activeElement?.closest('[role="menu"], [role="dialog"]')) return;
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
       if (
@@ -299,7 +335,7 @@ export function Workspace() {
         (e.altKey && !mod && (key === 'n' || e.code === 'KeyN'))
       ) {
         e.preventDefault();
-        void newNote();
+        openNewNote();
         return;
       }
       if (mod && key === 'f') {
@@ -315,28 +351,22 @@ export function Workspace() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [newNote]);
+  }, [noteId, openNewNote]);
 
-  const selectFilter = (f: Partial<ListFilters>) => {
-    setFilters(f);
-    if (!isTablet && noteId) closeNote();
-  };
   const sidebarHost = useSidebarHost({
     filters,
     select: (f) =>
-      selectFilter({ folderId: null, tagId: null, uncategorized: false, view: 'all', ...f }),
+      setFilters({ folderId: null, tagId: null, uncategorized: false, view: 'all', ...f }),
   });
 
   const sidebar = (
     <Sidebar
       filters={filters}
       actions={sidebarHost.actions}
-      onSelect={selectFilter}
-      onNewNote={() => {
-        setNavOpen(false);
-        void newNote();
-      }}
+      onSelect={setFilters}
       onNavigate={() => setNavOpen(false)}
+      collapsed={isDesktop && collapsed}
+      onToggle={isDesktop ? () => setCollapsed(!collapsed) : undefined}
     />
   );
 
@@ -349,147 +379,93 @@ export function Workspace() {
       onSort={(sort) => setFilters({ sort })}
       onDates={setFilters}
       onClearFilter={() => setFilters({ folderId: null, tagId: null, uncategorized: false })}
-      selectedId={noteId}
-      onOpen={openNote}
-      onCloseOpenNote={closeNote}
-      onNewNote={() => void newNote()}
+      onCompose={openNewNote}
+      onView={(view) => setFilters({ view, folderId: null, tagId: null, uncategorized: false })}
+      profile={
+        <AccountMenu
+          onImport={sidebarHost.actions.importTxt}
+          onCloudSave={() => sidebarHost.actions.open({ kind: 'cloud-save' })}
+        />
+      }
+      onOpen={openEditor}
       onMenu={isDesktop ? undefined : () => setNavOpen(true)}
     />
   );
 
-  const editorEl = noteId ? (
-    <NoteEditorContainer
-      noteId={noteId}
-      showBack={!isTablet}
-      onBack={closeNote}
-      onClosed={closeNote}
-    />
-  ) : (
-    <Dashboard
-      onNewNote={() => void newNote()}
-      onOpen={openNote}
-      onFolder={(id) => setFilters({ folderId: id, view: 'all' })}
-      onMenu={isTablet ? undefined : () => setNavOpen(true)}
-      search={search}
-      onSearch={setSearch}
-      onShowNotes={() =>
-        setFilters({ view: 'all', folderId: null, tagId: null, uncategorized: false })
-      }
-    />
-  );
-
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
-      {!online && (
-        <div
-          className="flex items-center justify-center gap-2 bg-warning/15 px-4 py-1.5 text-xs font-medium text-foreground"
-          role="status"
-        >
-          <CloudOff className="size-3.5" aria-hidden="true" />
-          {repo.kind === 'cloud'
-            ? 'You’re offline. Previously opened notes can be edited here. Text edits stay on this device and sync after reconnecting.'
-            : 'You’re offline. Guest notes keep working on this device.'}
-        </div>
-      )}
-      <GuestStorageNotice />
-      <GuestImportBanner />
-      {sidebarHost.elements}
-      <div className={cn('flex min-h-0 flex-1', isDesktop && 'bg-desk')}>
-        {isDesktop ? (
-          <aside className={collapsed ? 'w-16 shrink-0' : 'relative w-60 shrink-0 2xl:w-64'}>
-            {collapsed ? (
-              <div className="flex flex-col items-center gap-2">
-                <Link
-                  to="/welcome"
-                  aria-label="Noted home"
-                  title="Noted"
-                  className="grid h-16 place-items-center rounded-xl focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-                >
-                  <BrandMark size={32} />
-                </Link>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="icon"
-                      className="size-10 rounded-xl shadow-md shadow-primary/25"
-                      aria-label="New note"
-                      onClick={() => void newNote()}
-                    >
-                      <Plus />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">New note</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-10 rounded-xl text-muted-foreground"
-                      aria-label="Expand sidebar"
-                      onClick={toggleSidebar}
-                    >
-                      <PanelLeftOpen />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Expand sidebar</TooltipContent>
-                </Tooltip>
-              </div>
-            ) : (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="absolute top-4 right-2 z-10"
-                  aria-label="Collapse sidebar"
-                  onClick={toggleSidebar}
-                >
-                  <PanelLeftClose />
-                </Button>
-                {sidebar}
-              </>
-            )}
-          </aside>
-        ) : (
-          <Sheet open={navOpen} onOpenChange={setNavOpen}>
-            <SheetContent
-              side="left"
-              className="w-[18rem] max-w-[85vw] gap-0 p-0 [&>button]:hidden"
-              // Focus the drawer itself (not its first button) so no tooltip pops open.
-              onOpenAutoFocus={(e) => {
-                e.preventDefault();
-                (e.currentTarget as HTMLElement).focus();
-              }}
-            >
-              <SheetTitle className="sr-only">Navigation</SheetTitle>
-              <SheetDescription className="sr-only">
-                Views, folders, tags and settings
-              </SheetDescription>
-              {sidebar}
-            </SheetContent>
-          </Sheet>
-        )}
-
-        {isDesktop ? (
-          <div className="flex min-w-0 flex-1 gap-2 py-2 pr-2">
-            <div className="w-[19.5rem] shrink-0 overflow-hidden rounded-2xl border bg-background shadow-sm shadow-slate-900/[0.04] 2xl:w-[22rem]">
-              {listEl}
-            </div>
-            <main className="min-w-0 flex-1 overflow-hidden rounded-2xl border bg-background shadow-sm shadow-slate-900/[0.04]">
-              {editorEl}
-            </main>
+    <div className="noted-workspace flex h-dvh flex-col overflow-hidden">
+      <div
+        ref={libraryRef}
+        hidden={!!noteId}
+        className={cn('min-h-0 flex-1 flex-col', noteId ? 'hidden' : 'flex')}
+        onScrollCapture={(event) => {
+          if (
+            !noteId &&
+            event.target instanceof HTMLElement &&
+            event.target.matches('.noted-list-scroll')
+          )
+            libraryScrollTop.current = event.target.scrollTop;
+        }}
+      >
+        {!online && (
+          <div
+            className="flex items-center justify-center gap-2 bg-warning/15 px-4 py-1.5 text-xs font-medium text-foreground"
+            role="status"
+          >
+            <CloudOff className="size-3.5" aria-hidden="true" />
+            {repo.kind === 'cloud'
+              ? 'You’re offline. New notes and edits are kept on this device and sync after reconnecting.'
+              : 'You’re offline. Guest notes keep working on this device.'}
           </div>
-        ) : isTablet ? (
-          <>
-            <div className="w-[20rem] shrink-0 border-r">{listEl}</div>
-            <main className="min-w-0 flex-1">{editorEl}</main>
-          </>
-        ) : noteId || sp.get('dashboard') === '1' ? (
-          <main className="min-w-0 flex-1">{editorEl}</main>
-        ) : (
-          <div className="min-w-0 flex-1">{listEl}</div>
         )}
+        <GuestStorageNotice />
+        {online && <WorkspaceAnnouncements />}
+        <GuestImportBanner />
+        {sidebarHost.elements}
+        <div className="noted-workspace-body flex min-h-0 flex-1">
+          {isDesktop ? (
+            <aside
+              className={cn(
+                'noted-sidebar-shell relative shrink-0',
+                collapsed ? 'w-[4.375rem]' : 'w-[14.5rem]',
+              )}
+            >
+              {sidebar}
+            </aside>
+          ) : (
+            <Sheet open={navOpen} onOpenChange={setNavOpen}>
+              <SheetContent
+                side="left"
+                className="w-[18rem] max-w-[85vw] gap-0 p-0 [&>button]:hidden"
+                // Focus the drawer itself (not its first button) so no tooltip pops open.
+                onOpenAutoFocus={(e) => {
+                  e.preventDefault();
+                  (e.currentTarget as HTMLElement).focus();
+                }}
+              >
+                <SheetTitle className="sr-only">Navigation</SheetTitle>
+                <SheetDescription className="sr-only">Views, folders and tags</SheetDescription>
+                {sidebar}
+              </SheetContent>
+            </Sheet>
+          )}
+
+          <main className="noted-library min-h-0 min-w-0 flex-1 overflow-hidden">{listEl}</main>
+        </div>
       </div>
+      {noteId && (
+        <main
+          className="noted-editor-pane min-h-0 min-w-0 flex-1 overflow-hidden"
+          aria-label="Note editor"
+        >
+          <NoteEditorContainer
+            noteId={noteId}
+            composition={currentComposition}
+            onBack={closeNote}
+            onClosed={closeNote}
+          />
+        </main>
+      )}
     </div>
   );
 }

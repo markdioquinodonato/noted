@@ -1,3 +1,4 @@
+import { useBlocker, useLocation, useNavigate } from 'react-router';
 import {
   useCallback,
   useDeferredValue,
@@ -12,28 +13,37 @@ import {
   AlertTriangle,
   Archive,
   ArchiveRestore,
-  ArrowLeft,
   Check,
   FileQuestion,
   CloudOff,
   Download,
   History,
   MoreHorizontal,
+  Palette,
   Pin,
   PinOff,
   RotateCcw,
   Save,
   Trash2,
-  X,
   Star,
   Copy,
   Maximize,
   Minimize,
   ScanText,
   Type,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { RadioGroup } from 'radix-ui';
+import { BrandMark } from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,8 +52,6 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, EmptyState, modKey, Spinner } from '@/components/common';
 import { useRepo } from '@/app/RepositoryProvider';
@@ -63,11 +71,11 @@ import { DEFAULT_FONT, getNoteFont, NOTE_FONTS } from '@/lib/fonts';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScannerDialog } from '@/features/scanner/ScannerDialog';
 import { NoteSaver, type SaverState } from './noteSaver';
+import { emptyCompositionNote, type NoteComposition } from './noteComposition';
 import {
   qk,
   useFolders,
   useNote,
-  useMediaQuery,
   usePreferences,
   useRefreshLists,
   useTagMutations,
@@ -76,39 +84,75 @@ import {
 import { FolderPicker, TagPicker } from './pickers';
 import { ConfirmDialog } from './dialogs';
 import { VersionHistoryDialog } from './VersionHistoryDialog';
+import type { CaptureMode } from './CaptureBar';
+import './focusEditor.css';
 
 interface ContainerProps {
   noteId: string;
   onBack: () => void;
   onClosed: () => void;
-  showBack: boolean;
+  composition?: NoteComposition;
 }
 
 /** Loads the note (+ any recovered local draft) and mounts a fresh editor per note. */
-export function NoteEditorContainer({ noteId, onBack, onClosed, showBack }: ContainerProps) {
+export function NoteEditorContainer({ noteId, onBack, onClosed, composition }: ContainerProps) {
   const { repo } = useRepo();
-  const note = useNote(noteId);
+  const note = useNote(noteId, !!composition);
   const draft = useQuery({
     queryKey: ['draft', repo.scope, noteId],
     queryFn: async () => (await drafts.get(repo.scope, noteId)) ?? null,
+    networkMode: 'always',
     staleTime: 0,
     gcTime: 0,
   });
   const [epoch, setEpoch] = useState(0);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const historyState = location.state as {
+    capture?: CaptureMode;
+    composition?: NoteComposition;
+  } | null;
+  const capture = historyState?.capture;
+  const compositionInfo = composition ?? draft.data?.creation;
+  const creation = note.data ? undefined : compositionInfo;
+  const initial = note.data ?? (creation ? emptyCompositionNote(creation) : null);
 
-  if (note.isLoading || draft.isLoading) return <EditorSkeleton />;
-  if (note.isError)
+  useEffect(() => {
+    if (capture && note.data && !draft.isLoading) {
+      void navigate(location.pathname + location.search, {
+        replace: true,
+        state: { ...historyState, capture: undefined },
+        preventScrollReset: true,
+      });
+    }
+  }, [
+    capture,
+    historyState,
+    note.data,
+    draft.isLoading,
+    location.pathname,
+    location.search,
+    navigate,
+  ]);
+
+  if (note.isLoading || draft.isLoading)
     return (
-      <div className="p-6">
+      <EditorPlaceholder onBack={onBack}>
+        <EditorSkeleton />
+      </EditorPlaceholder>
+    );
+  if (note.isError && !initial)
+    return (
+      <EditorPlaceholder onBack={onBack}>
         <Alert tone="error">
           {errorMessage(note.error, 'Could not load this note.')}{' '}
           <button className="font-medium underline" onClick={() => void note.refetch()}>
             Retry
           </button>
         </Alert>
-      </div>
+      </EditorPlaceholder>
     );
-  if (!note.data)
+  if (!initial)
     return (
       <EmptyState
         icon={<FileQuestion />}
@@ -126,9 +170,10 @@ export function NoteEditorContainer({ noteId, onBack, onClosed, showBack }: Cont
   return (
     <NoteEditor
       key={`${noteId}:${epoch}`}
-      note={note.data}
+      note={initial}
+      creation={creation}
       draft={draft.data ?? null}
-      showBack={showBack}
+      initialCapture={capture}
       onBack={onBack}
       onClosed={onClosed}
       onReload={() => setEpoch((e) => e + 1)}
@@ -138,7 +183,7 @@ export function NoteEditorContainer({ noteId, onBack, onClosed, showBack }: Cont
 
 function EditorSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-4 p-6 sm:p-10" aria-busy="true">
+    <div className="space-y-4" aria-busy="true" aria-label="Loading note">
       <Skeleton className="h-9 w-2/3" />
       <Skeleton className="h-4 w-full" />
       <Skeleton className="h-4 w-11/12" />
@@ -147,13 +192,42 @@ function EditorSkeleton() {
   );
 }
 
+function EditorPlaceholder({
+  children,
+  onBack,
+}: {
+  children: React.ReactNode;
+  onBack: () => void;
+}) {
+  return (
+    <div className="noted-focus">
+      <div className="noted-focus-header">
+        <div className="noted-focus-toolbar">
+          <div className="noted-focus-brand">
+            <BrandMark size={27} />
+            <span>Noted</span>
+          </div>
+          <Button variant="outline" className="noted-focus-done" onClick={onBack}>
+            Done
+          </Button>
+        </div>
+      </div>
+      <div className="noted-focus-scroll scrollbar-thin">
+        <div className="noted-focus-sheet">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function SaveIndicator({
   state,
   local,
+  isNew,
   onRetry,
 }: {
   state: SaverState;
   local: boolean;
+  isNew: boolean;
   onRetry: () => void;
 }) {
   const where = local ? 'on this device' : 'to cloud';
@@ -168,7 +242,8 @@ function SaveIndicator({
       case 'unsaved':
         return (
           <>
-            <span className="size-2 rounded-full bg-warning" aria-hidden="true" /> Unsaved changes
+            <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />{' '}
+            Unsaved changes
           </>
         );
       case 'offline':
@@ -205,16 +280,21 @@ function SaveIndicator({
           </>
         );
       default:
-        return (
+        return isNew ? (
           <>
-            <Check className="size-3.5 text-success" aria-hidden="true" /> Saved {where}
+            <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" /> New
+            note
+          </>
+        ) : (
+          <>
+            <Check className="size-3.5 text-primary" aria-hidden="true" /> Saved {where}
           </>
         );
     }
   })();
   return (
     <span
-      className="inline-flex items-center gap-1.5"
+      className="noted-focus-save"
       role="status"
       aria-live="polite"
       data-testid="save-status"
@@ -227,14 +307,23 @@ function SaveIndicator({
 
 interface EditorProps {
   note: Note;
+  creation?: NoteComposition;
   draft: DraftRecord | null;
-  showBack: boolean;
   onBack: () => void;
   onClosed: () => void;
   onReload: () => void;
+  initialCapture?: CaptureMode;
 }
 
-function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload }: EditorProps) {
+function NoteEditor({
+  note: initial,
+  creation,
+  draft,
+  onBack,
+  onClosed,
+  onReload,
+  initialCapture,
+}: EditorProps) {
   const { repo } = useRepo();
   const qc = useQueryClient();
   const refreshLists = useRefreshLists();
@@ -262,7 +351,21 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<RichEditorHandle>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(initialCapture === 'scan');
+  const [colorOpen, setColorOpen] = useState(initialCapture === 'color');
+  const [formattingOpen, setFormattingOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const scanInserted = useRef(false);
+  const scanToggle = useRef<HTMLButtonElement>(null);
+  const colorToggle = useRef<HTMLButtonElement>(null);
+  const toolsToggle = useRef<HTMLButtonElement>(null);
+  const moreToggle = useRef<HTMLButtonElement>(null);
+  const enteringFocus = useRef(false);
+  const editorRoot = useRef<HTMLDivElement>(null);
+  const [initialAction] = useState(initialCapture);
 
   // One saver per mounted note. Created once; re-activated on StrictMode remount.
   const [saver] = useState(
@@ -270,6 +373,7 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
       new NoteSaver(initial.id, initial, {
         repo,
         drafts,
+        creation,
         autosave: prefs.autosaveEnabled,
         // Guest notes live in IndexedDB: saving never depends on the network.
         isOnline: repo.kind === 'local' ? () => true : undefined,
@@ -286,6 +390,7 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
       }),
   );
   const state = useSyncExternalStore(saver.subscribe, () => saver.getState());
+  const ensureCreated = useCallback(() => saver.ensureCreated(), [saver]);
 
   useEffect(() => {
     saver.activate();
@@ -307,10 +412,13 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
 
   // Cross-device: when the window regains focus and we have no local edits, pick up remote changes.
   useEffect(() => {
+    let active = true;
     const onFocus = async () => {
-      if (saver.hasUnsavedChanges() || document.visibilityState !== 'visible') return;
+      if (saver.isNew || saver.hasUnsavedChanges() || document.visibilityState !== 'visible')
+        return;
       try {
         const latest = await repo.getNote(initial.id);
+        if (!active) return;
         if (latest && latest.updatedAt !== saver.baseUpdatedAt && !saver.hasUnsavedChanges()) {
           qc.setQueryData(qk.note(repo.scope, latest.id), latest);
           onReload();
@@ -337,6 +445,7 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
     window.addEventListener('focus', onFocus);
     const timer = setInterval(() => void onFocus(), repo.kind === 'cloud' ? 15000 : 5000);
     return () => {
+      active = false;
       window.removeEventListener('focus', onFocus);
       clearInterval(timer);
       if (channel) void supabase!.removeChannel(channel);
@@ -354,19 +463,28 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
     };
     fit();
     document.fonts?.addEventListener?.('loadingdone', fit);
+    window.addEventListener('resize', fit);
     void document.fonts?.ready.then(fit);
-    return () => document.fonts?.removeEventListener?.('loadingdone', fit);
+    return () => {
+      document.fonts?.removeEventListener?.('loadingdone', fit);
+      window.removeEventListener('resize', fit);
+    };
   }, [title, font]);
 
-  // Focus body for brand-new empty notes.
+  // Capture dialogs handle their own focus. Open editable notes with the cursor ready.
   useEffect(() => {
-    if (!initial.title && !initial.content) titleRef.current?.focus();
+    if (initialAction) return;
+    if (!initial.deletedAt && initial.permission !== 'read') bodyRef.current?.focus();
+    else editorRoot.current?.focus({ preventScroll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const deferred = useDeferredValue(content);
-  const words = useMemo(() => countWords(deferred), [deferred]);
-  const chars = useMemo(() => countCharacters(deferred), [deferred]);
+  const words = useMemo(() => (detailsOpen ? countWords(deferred) : 0), [deferred, detailsOpen]);
+  const chars = useMemo(
+    () => (detailsOpen ? countCharacters(deferred) : 0),
+    [deferred, detailsOpen],
+  );
 
   const trashed = !!meta.deletedAt;
   const readOnly = trashed || conflict !== undefined || meta.permission === 'read';
@@ -388,7 +506,7 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
   const saveNow = useCallback(async () => {
     await saver.flush();
     const s = saver.getState().status;
-    if (s === 'saved') {
+    if (s === 'saved' && !saver.isNew) {
       try {
         const v = await repo.createCheckpoint(initial.id);
         if (v) {
@@ -420,8 +538,9 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
 
   const setTags = async (tagIds: string[]) => {
     const prev = meta.tagIds;
-    setMeta((m) => ({ ...m, tagIds }));
     try {
+      await ensureCreated();
+      setMeta((m) => ({ ...m, tagIds }));
       await repo.setNoteTags(initial.id, tagIds);
       qc.setQueryData(qk.note(repo.scope, initial.id), (n: Note | null | undefined) =>
         n ? { ...n, tagIds } : n,
@@ -430,6 +549,64 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
     } catch (e) {
       setMeta((m) => ({ ...m, tagIds: prev }));
       toast.error(errorMessage(e));
+    }
+  };
+
+  const saveBeforeLeaving = useCallback(async () => {
+    try {
+      await saver.flush();
+      const current = saver.getState();
+      if (saver.hasUnsavedChanges()) {
+        if (current.status === 'conflict') {
+          toast.error('Resolve the conflicting edits before closing this note.');
+          return false;
+        }
+        if (!current.localDraftSaved) {
+          toast.error('Keep this note open and retry, or download a copy of your edits.');
+          return false;
+        }
+        toast.info('Your pending edits are saved on this device.');
+      }
+      return true;
+    } catch (error) {
+      toast.error(errorMessage(error, 'Could not finish saving this note.'));
+      return false;
+    }
+  }, [saver]);
+
+  const routeBlocker = useBlocker(
+    useCallback(
+      ({ currentLocation, nextLocation }) =>
+        currentLocation.pathname !== nextLocation.pathname &&
+        saver.hasUnsavedChanges() &&
+        (!saver.getState().localDraftSaved || saver.getState().status === 'conflict'),
+      [saver],
+    ),
+  );
+  const leaving = closing || routeBlocker.state === 'blocked';
+
+  useEffect(() => {
+    if (routeBlocker.state !== 'blocked') return;
+    let active = true;
+    void saveBeforeLeaving().then((safe) => {
+      if (!active) return;
+      if (safe) routeBlocker.proceed();
+      else routeBlocker.reset();
+    });
+    return () => {
+      active = false;
+    };
+  }, [routeBlocker, saveBeforeLeaving]);
+
+  const finishWriting = async () => {
+    if (closingRef.current || routeBlocker.state === 'blocked') return;
+    closingRef.current = true;
+    setClosing(true);
+    try {
+      if (await saveBeforeLeaving()) onBack();
+    } finally {
+      closingRef.current = false;
+      setClosing(false);
     }
   };
 
@@ -455,189 +632,214 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
 
   const fontSize = prefs.fontSize;
   const edited = state.lastSavedAt ?? meta.updatedAt;
+  const leaveImmersion = () => {
+    setFullscreen(false);
+    requestAnimationFrame(() => moreToggle.current?.focus());
+  };
 
   return (
     <div
-      className={cn(
-        'flex h-full min-h-0 flex-col bg-editor text-foreground transition-colors duration-300',
-        fullscreen && 'fixed inset-0 z-40',
-      )}
+      ref={editorRoot}
+      tabIndex={-1}
+      className="noted-focus"
+      data-immersive={fullscreen}
+      onKeyDownCapture={(event) => {
+        if (
+          fullscreen &&
+          event.key === 'Escape' &&
+          !event.defaultPrevented &&
+          editorRoot.current?.contains(event.target as Node)
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          leaveImmersion();
+        }
+      }}
       data-note-color={meta.color && meta.color !== 'default' ? meta.color : undefined}
     >
-      {/* Toolbar */}
-      <div className="flex h-14 shrink-0 items-center gap-1 border-b bg-background/60 px-2 backdrop-blur sm:px-4">
-        {showBack && (
-          <Button variant="ghost" size="icon" onClick={onBack} aria-label="Back to notes list">
-            <ArrowLeft />
-          </Button>
-        )}
-        <FolderPicker
-          folders={folders.data ?? []}
-          value={meta.folderId}
-          disabled={metaReadOnly}
-          onChange={(folderId) =>
-            runMeta({ folderId }, folderId ? 'Moved to folder' : 'Removed from folder')
-          }
-        />
-        <TagPicker
-          tags={tags.data ?? []}
-          value={meta.tagIds}
-          disabled={metaReadOnly}
-          onChange={setTags}
-          onCreate={(name) => tagMutations.create.mutateAsync(name)}
-        />
-        <div className="flex-1" />
-        <span className="mr-1 hidden rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground md:inline-flex">
-          <SaveIndicator
-            state={state}
-            local={repo.kind === 'local'}
-            onRetry={() => void saver.flush()}
-          />
-        </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="hidden sm:inline-flex"
-          aria-label={fullscreen ? 'Exit full screen' : 'Full screen writing'}
-          onClick={() => setFullscreen((v) => !v)}
-        >
-          {fullscreen ? <Minimize /> : <Maximize />}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={meta.isFavorite ? 'Remove favorite' : 'Favorite note'}
-          aria-pressed={!!meta.isFavorite}
-          disabled={metaReadOnly}
-          onClick={() => runMeta({ isFavorite: !meta.isFavorite })}
-        >
-          <Star className={meta.isFavorite ? 'fill-amber-400 text-amber-500' : ''} />
-        </Button>
-        {!trashed && (
-          <>
-            <Tooltip>
-              <TooltipTrigger asChild>
+      <div className="noted-focus-header">
+        <div className="noted-focus-toolbar">
+          <div className="noted-focus-brand">
+            <BrandMark size={27} />
+            <span>Noted</span>
+          </div>
+          <div className="noted-focus-actions" aria-label="Writing controls" role="group">
+            {fullscreen && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={leaveImmersion}
+                aria-label="Exit focus writing"
+              >
+                <Minimize />
+                <span>Exit focus writing</span>
+              </Button>
+            )}
+            {!fullscreen && !readOnly && (
+              <Button
+                variant={formattingOpen ? 'secondary' : 'ghost'}
+                size="sm"
+                aria-expanded={formattingOpen}
+                aria-controls="noted-text-formatting"
+                aria-label="Format text"
+                title="Format text"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setFormattingOpen((open) => !open)}
+              >
+                <Type />
+                <span>Format</span>
+              </Button>
+            )}
+            {!fullscreen && !trashed && (
+              <Button
+                ref={toolsToggle}
+                variant={toolsOpen ? 'secondary' : 'ghost'}
+                size="sm"
+                aria-expanded={toolsOpen}
+                aria-controls="noted-note-tools"
+                aria-label="Note tools"
+                title="Note tools"
+                onClick={() => setToolsOpen((open) => !open)}
+              >
+                <SlidersHorizontal />
+                <span>Tools</span>
+              </Button>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                 <Button
+                  ref={moreToggle}
                   variant="ghost"
                   size="icon"
-                  aria-pressed={meta.isPinned}
-                  aria-label={meta.isPinned ? 'Unpin note' : 'Pin note'}
-                  disabled={metaReadOnly}
-                  onClick={() => runMeta({ isPinned: !meta.isPinned })}
-                  className={cn(meta.isPinned && 'text-primary')}
+                  className={fullscreen ? 'hidden' : undefined}
+                  aria-label="More note actions"
                 >
-                  {meta.isPinned ? <PinOff /> : <Pin />}
+                  <MoreHorizontal />
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent>{meta.isPinned ? 'Unpin' : 'Pin to top'}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Save now (${modKey}+S)`}
-                  disabled={readOnly}
-                  onClick={() => void saveNow()}
-                >
-                  <Save />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Save &amp; checkpoint ({modKey}+S)</TooltipContent>
-            </Tooltip>
-          </>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="More note actions">
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            {!trashed && (
-              <DropdownMenuItem
-                disabled={readOnly}
-                onSelect={async () => {
-                  try {
-                    const n = await repo.createNote({
-                      title: `${title || 'Untitled'} (copy)`.slice(0, LIMITS.titleMax),
-                      content,
-                      folderId: meta.permission ? null : meta.folderId,
-                      tagIds: meta.permission ? [] : meta.tagIds,
-                      color: meta.color,
-                      isFavorite: meta.isFavorite,
-                    });
-                    refreshLists();
-                    toast.success(`Duplicated as ${n.title}`);
-                  } catch (e) {
-                    toast.error(errorMessage(e));
-                  }
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-56"
+                onCloseAutoFocus={(event) => {
+                  if (!enteringFocus.current) return;
+                  event.preventDefault();
+                  enteringFocus.current = false;
+                  bodyRef.current?.focus();
                 }}
               >
-                <Copy /> Duplicate note
-              </DropdownMenuItem>
-            )}
-            {!trashed && !meta.permission && (
-              <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
-                <History /> Version history
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onSelect={() => exportNoteAsTxt({ title, content })}>
-              <Download /> Export as .txt
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => exportMarkdown({ title, content })}>
-              <Download /> Export as Markdown
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                void exportDocx({ title, content }).catch((e) => toast.error(errorMessage(e)));
-              }}
-            >
-              <Download /> Export as DOCX
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                void printNote({ title, content }).catch((e) => toast.error(errorMessage(e)));
-              }}
-            >
-              <Download /> Print / Save as PDF
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {trashed ? (
-              <>
-                <DropdownMenuItem onSelect={() => void restoreFromTrash()}>
-                  <RotateCcw /> Restore
-                </DropdownMenuItem>
-                <DropdownMenuItem variant="destructive" onSelect={() => setConfirmDelete(true)}>
-                  <Trash2 /> Delete forever
-                </DropdownMenuItem>
-              </>
-            ) : (
-              <>
                 <DropdownMenuItem
-                  disabled={metaReadOnly}
-                  onSelect={() =>
-                    runMeta(
-                      { isArchived: !meta.isArchived },
-                      meta.isArchived ? 'Note unarchived' : 'Note archived',
-                    )
-                  }
+                  onSelect={() => {
+                    enteringFocus.current = true;
+                    setFullscreen(true);
+                  }}
                 >
-                  {meta.isArchived ? <ArchiveRestore /> : <Archive />}
-                  {meta.isArchived ? 'Unarchive' : 'Archive'}
+                  <Maximize /> Focus writing
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setDetailsOpen((open) => !open)}>
+                  {detailsOpen ? 'Hide note details' : 'Show note details'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {!trashed && !readOnly && !saver.isNew && (
+                  <DropdownMenuItem onSelect={() => void saveNow()}>
+                    <Save /> Save checkpoint <DropdownMenuShortcut>{modKey}+S</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                )}
+                {!trashed && !saver.isNew && (
+                  <DropdownMenuItem
+                    disabled={readOnly}
+                    onSelect={async () => {
+                      try {
+                        const n = await repo.createNote({
+                          title: `${title || 'Untitled'} (copy)`.slice(0, LIMITS.titleMax),
+                          content,
+                          folderId: meta.permission ? null : meta.folderId,
+                          tagIds: meta.permission ? [] : meta.tagIds,
+                          color: meta.color,
+                          isFavorite: meta.isFavorite,
+                        });
+                        refreshLists();
+                        toast.success(`Duplicated as ${n.title}`);
+                      } catch (e) {
+                        toast.error(errorMessage(e));
+                      }
+                    }}
+                  >
+                    <Copy /> Duplicate note
+                  </DropdownMenuItem>
+                )}
+                {!trashed && !meta.permission && !saver.isNew && (
+                  <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                    <History /> Version history
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={() => exportNoteAsTxt({ title, content })}>
+                  <Download /> Export as .txt
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => exportMarkdown({ title, content })}>
+                  <Download /> Export as Markdown
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  variant="destructive"
-                  disabled={metaReadOnly}
-                  onSelect={() => void moveToTrash()}
+                  onSelect={() => {
+                    void exportDocx({ title, content }).catch((e) => toast.error(errorMessage(e)));
+                  }}
                 >
-                  <Trash2 /> Move to Trash
-                  <DropdownMenuShortcut />
+                  <Download /> Export as DOCX
                 </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void printNote({ title, content }).catch((e) => toast.error(errorMessage(e)));
+                  }}
+                >
+                  <Download /> Print / Save as PDF
+                </DropdownMenuItem>
+                {!saver.isNew && <DropdownMenuSeparator />}
+                {trashed && (
+                  <>
+                    <DropdownMenuItem onSelect={() => void restoreFromTrash()}>
+                      <RotateCcw /> Restore
+                    </DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onSelect={() => setConfirmDelete(true)}>
+                      <Trash2 /> Delete forever
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {!trashed && !saver.isNew && (
+                  <>
+                    <DropdownMenuItem
+                      disabled={metaReadOnly}
+                      onSelect={() =>
+                        runMeta(
+                          { isArchived: !meta.isArchived },
+                          meta.isArchived ? 'Note unarchived' : 'Note archived',
+                        )
+                      }
+                    >
+                      {meta.isArchived ? <ArchiveRestore /> : <Archive />}
+                      {meta.isArchived ? 'Unarchive' : 'Archive'}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      variant="destructive"
+                      disabled={metaReadOnly}
+                      onSelect={() => void moveToTrash()}
+                    >
+                      <Trash2 /> Move to Trash
+                      <DropdownMenuShortcut />
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="outline"
+              className="noted-focus-done"
+              disabled={leaving}
+              aria-busy={leaving}
+              onClick={() => void finishWriting()}
+            >
+              <Check aria-hidden="true" /> Done
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Banners */}
@@ -746,13 +948,50 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
             : 'You can edit text. Concurrent changes are checked on save.'}
         </p>
       )}
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row-reverse">
+      <div className="flex min-h-0 flex-1 flex-col">
         {!trashed && (
           <div
-            className="tool-dock flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1.5 scrollbar-none sm:px-4 lg:w-[4.75rem] lg:flex-col lg:gap-1 lg:overflow-x-visible lg:overflow-y-auto lg:border-b-0 lg:border-l lg:bg-muted/30 lg:px-0 lg:py-3 [&_[data-slot=button]]:shrink-0"
+            id="noted-note-tools"
+            hidden={!toolsOpen || fullscreen}
+            className="noted-focus-tools"
             aria-label="Note tools"
             role="group"
           >
+            {!readOnly && (
+              <Button
+                ref={scanToggle}
+                type="button"
+                size="xs"
+                variant="ghost"
+                onClick={() => {
+                  scanInserted.current = false;
+                  setScannerOpen(true);
+                }}
+                aria-label="Scan text with camera"
+                aria-haspopup="dialog"
+              >
+                <ScanText />
+                <span>Scan text</span>
+              </Button>
+            )}
+            <ProductivityTools
+              note={meta}
+              disabled={readOnly}
+              bodyRef={bodyRef}
+              update={runMeta}
+              ensureCreated={ensureCreated}
+              initialTool={
+                initialAction === 'voice' ||
+                initialAction === 'attachments' ||
+                initialAction === 'reminder'
+                  ? initialAction
+                  : null
+              }
+              returnFocus={() => {
+                if (toolsOpen) toolsToggle.current?.focus();
+                else titleRef.current?.focus();
+              }}
+            />
             <AiAssistant
               bodyRef={bodyRef}
               disabled={readOnly}
@@ -761,60 +1000,80 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
                 saver.edit({ title: value });
               }}
             />
-            <span aria-hidden="true" className="hidden h-px w-8 shrink-0 bg-border lg:block" />
-            <ProductivityTools note={meta} disabled={readOnly} bodyRef={bodyRef} update={runMeta} />
-            <span className="min-w-3 flex-1" />
             <FontPicker value={font ?? DEFAULT_FONT} disabled={readOnly} onChange={changeFont} />
-            <span className="hidden text-[0.6rem] font-semibold tracking-wider text-muted-foreground uppercase lg:block">
-              Theme
-            </span>
-            <NoteColorPicker
-              value={meta.color ?? 'default'}
-              disabled={metaReadOnly}
-              onChange={(color) => void runMeta({ color })}
-            />
+            {!meta.permission && (
+              <div
+                className="flex w-full flex-wrap items-center gap-1 border-t pt-1"
+                role="group"
+                aria-label="Organize note"
+              >
+                <FolderPicker
+                  folders={folders.data ?? []}
+                  value={meta.folderId}
+                  disabled={metaReadOnly}
+                  onChange={(folderId) =>
+                    runMeta({ folderId }, folderId ? 'Moved to folder' : 'Removed from folder')
+                  }
+                />
+                <TagPicker
+                  tags={tags.data ?? []}
+                  value={meta.tagIds}
+                  disabled={metaReadOnly}
+                  onChange={setTags}
+                  onCreate={(name) => tagMutations.create.mutateAsync(name)}
+                />
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  aria-label={meta.isFavorite ? 'Remove favorite' : 'Favorite note'}
+                  aria-pressed={!!meta.isFavorite}
+                  disabled={metaReadOnly}
+                  onClick={() => runMeta({ isFavorite: !meta.isFavorite })}
+                >
+                  <Star className={meta.isFavorite ? 'fill-current text-primary' : ''} />
+                  Favorite
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  aria-pressed={meta.isPinned}
+                  aria-label={meta.isPinned ? 'Unpin note' : 'Pin note'}
+                  disabled={metaReadOnly}
+                  onClick={() => runMeta({ isPinned: !meta.isPinned })}
+                  className={cn(meta.isPinned && 'text-primary')}
+                >
+                  {meta.isPinned ? <PinOff /> : <Pin />}
+                  {meta.isPinned ? 'Unpin' : 'Pin'}
+                </Button>
+                <Button
+                  ref={colorToggle}
+                  variant="ghost"
+                  size="xs"
+                  aria-label="Note color"
+                  aria-haspopup="dialog"
+                  disabled={metaReadOnly}
+                  onClick={() => setColorOpen(true)}
+                >
+                  <Palette />
+                  Color
+                </Button>
+              </div>
+            )}
           </div>
         )}
         {/* Writing area */}
         <div
-          className="relative min-h-0 flex-1 overflow-y-auto scrollbar-thin"
+          className="noted-focus-scroll scrollbar-thin"
           onClick={(e) => e.target === e.currentTarget && bodyRef.current?.focus()}
         >
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-primary/[0.07] via-primary/[0.025] to-transparent"
-          />
-          <div className="relative mx-auto flex min-h-full w-full max-w-[50rem] flex-col px-5 pt-6 pb-24 sm:px-10 sm:pt-12 2xl:px-14">
-            {meta.tagIds.length > 0 && (
-              <div className="mb-3 flex flex-wrap gap-1.5">
-                {meta.tagIds.map((id) => {
-                  const t = tags.data?.find((x) => x.id === id);
-                  if (!t) return null;
-                  return (
-                    <Badge key={id} variant="secondary" className="gap-1 font-normal">
-                      #{t.name}
-                      {!readOnly && (
-                        <button
-                          type="button"
-                          aria-label={`Remove tag ${t.name}`}
-                          onClick={() => void setTags(meta.tagIds.filter((x) => x !== id))}
-                          className="-mr-1 rounded-sm opacity-60 hover:opacity-100"
-                        >
-                          <X className="size-3" />
-                        </button>
-                      )}
-                    </Badge>
-                  );
-                })}
-              </div>
-            )}
+          <div className="noted-focus-sheet">
             <textarea
               ref={titleRef}
               value={title}
               rows={1}
               maxLength={LIMITS.titleMax}
-              readOnly={readOnly}
-              placeholder="Untitled"
+              readOnly={readOnly || leaving}
+              placeholder={readOnly ? 'Untitled note' : 'Title (optional)'}
               aria-label="Note title"
               onChange={(e) => {
                 const v = e.target.value.replace(/\n/g, ' ');
@@ -822,32 +1081,22 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
                 saver.edit({ title: v });
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+                if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   bodyRef.current?.focus();
                 }
               }}
               style={{ fontFamily: writing.family, ['--font-scale' as string]: writing.scale }}
-              className="w-full resize-none overflow-hidden border-0 bg-transparent p-0 pb-1 text-[calc(1.875rem*var(--font-scale,1))] leading-[1.3] font-bold tracking-tight outline-none placeholder:text-muted-foreground/40 sm:text-[calc(2.5rem*var(--font-scale,1))]"
+              className="noted-focus-title"
             />
-            <p className="mt-3 mb-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              <time dateTime={edited} title={formatDateTime(edited)}>
-                Edited {formatRelative(edited)}
-              </time>
-              <span aria-hidden="true">·</span>
-              <span>{Math.max(1, Math.round(words / 200))} min read</span>
-              {meta.isPinned && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">
-                  <Pin className="size-3" aria-hidden="true" /> Pinned
-                </span>
-              )}
-            </p>
             <RichEditor
               ref={bodyRef}
               initialContent={content}
-              readOnly={readOnly}
+              readOnly={readOnly || leaving}
+              showFormatting={formattingOpen && !fullscreen && !readOnly}
               fontSize={fontSize}
               font={font}
+              autoFocus={!readOnly && (initialAction === 'checklist' || !initialAction)}
               onChange={(value) => {
                 setContent(value);
                 saver.edit({ content: value });
@@ -855,26 +1104,16 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
               onBlur={() => {
                 if (saver.hasUnsavedChanges() && prefs.autosaveEnabled) void saver.flush();
               }}
-              trailing={
-                !readOnly && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8 rounded-lg px-2.5 shadow-sm"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => setScannerOpen(true)}
-                    aria-label="Scan text with camera"
-                    title="Scan text with camera"
-                  >
-                    <ScanText />
-                    <span className="hidden sm:inline">Scan text</span>
-                  </Button>
-                )
-              }
             />
             <ScannerDialog
               open={scannerOpen}
               onOpenChange={setScannerOpen}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                if (scanInserted.current) bodyRef.current?.focus();
+                else if (toolsOpen) scanToggle.current?.focus();
+                else titleRef.current?.focus();
+              }}
               onInsert={(text) => {
                 const editor = bodyRef.current?.getEditor();
                 if (!editor || editor.isDestroyed) throw new Error('The note is not ready yet.');
@@ -883,6 +1122,7 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
                   .focus()
                   .insertContent(textDocument(text).content ?? [])
                   .run();
+                scanInserted.current = true;
                 toast.success('Scanned text added to your note');
               }}
             />
@@ -890,29 +1130,54 @@ function NoteEditor({ note: initial, draft, showBack, onBack, onClosed, onReload
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="flex h-9 shrink-0 items-center gap-3 border-t px-4 text-xs text-muted-foreground">
-        <span className="md:hidden">
+      <div className="noted-focus-footer">
+        <div className="noted-focus-footer-inner">
           <SaveIndicator
             state={state}
             local={repo.kind === 'local'}
+            isNew={saver.isNew}
             onRetry={() => void saver.flush()}
           />
-        </span>
-        <span className="hidden truncate md:inline">{displayTitle(title, content)}</span>
-        <span className="flex-1" />
-        <span data-testid="word-count">
-          {words.toLocaleString()} {words === 1 ? 'word' : 'words'}
-        </span>
-        <span aria-hidden="true">·</span>
-        <span data-testid="char-count">
-          {chars.toLocaleString()} {chars === 1 ? 'character' : 'characters'}
-        </span>
-        {!prefs.autosaveEnabled && (
-          <span className="hidden sm:inline">· Autosave off — {modKey}+S to save</span>
-        )}
+          {!prefs.autosaveEnabled && <span>Autosave off · {modKey}+S to save</span>}
+          {detailsOpen && !fullscreen && (
+            <div className="noted-focus-details" aria-label="Note details" role="group">
+              {!saver.isNew && (
+                <time dateTime={edited} title={formatDateTime(edited)}>
+                  Edited {formatRelative(edited)}
+                </time>
+              )}
+              <span data-testid="word-count">
+                {words.toLocaleString()} {words === 1 ? 'word' : 'words'}
+              </span>
+              <span data-testid="char-count">
+                {chars.toLocaleString()} {chars === 1 ? 'character' : 'characters'}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
+      <Dialog open={colorOpen && !metaReadOnly} onOpenChange={setColorOpen}>
+        <DialogContent
+          className="sm:max-w-xs"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (toolsOpen && !metaReadOnly) colorToggle.current?.focus();
+            else if (toolsOpen) toolsToggle.current?.focus();
+            else titleRef.current?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Note color</DialogTitle>
+            <DialogDescription>Choose a color for this note.</DialogDescription>
+          </DialogHeader>
+          <NoteColorPicker
+            value={meta.color ?? 'default'}
+            disabled={metaReadOnly}
+            onChange={(color) => void runMeta({ color })}
+          />
+        </DialogContent>
+      </Dialog>
       <VersionHistoryDialog
         open={historyOpen}
         onOpenChange={setHistoryOpen}
@@ -967,25 +1232,23 @@ function NoteColorPicker({
   onChange(color: string): void;
 }) {
   return (
-    <div
-      role="radiogroup"
+    <RadioGroup.Root
+      value={value}
+      onValueChange={onChange}
       aria-label="Note color"
-      className="flex shrink-0 items-center gap-1 rounded-full border bg-background/70 p-1 lg:flex-col lg:gap-1.5 lg:p-1.5"
+      disabled={disabled}
+      className="mx-auto grid w-fit grid-cols-3 gap-2 rounded-2xl border bg-muted/30 p-2 min-[360px]:grid-cols-6 sm:mx-0"
     >
       {NOTE_COLORS.map((c) => {
         const selected = value === c;
         return (
-          <button
+          <RadioGroup.Item
             key={c}
-            type="button"
-            role="radio"
-            aria-checked={selected}
+            value={c}
             aria-label={COLOR_LABELS[c]}
             title={`${COLOR_LABELS[c]} theme`}
-            disabled={disabled}
-            onClick={() => !selected && onChange(c)}
             className={cn(
-              'grid size-6 place-items-center rounded-full border transition-transform outline-none hover:scale-110 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50',
+              'grid size-8 place-items-center rounded-full border transition-transform outline-none hover:scale-110 focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50',
               selected && 'ring-2 ring-foreground/70 ring-offset-1 ring-offset-background',
             )}
             style={{
@@ -1003,10 +1266,10 @@ function NoteColorPicker({
                 aria-hidden="true"
               />
             )}
-          </button>
+          </RadioGroup.Item>
         );
       })}
-    </div>
+    </RadioGroup.Root>
   );
 }
 
@@ -1021,7 +1284,6 @@ function FontPicker({
   onChange(font: string): void;
 }) {
   const [open, setOpen] = useState(false);
-  const docked = useMediaQuery('(min-width: 1024px)');
   const current = getNoteFont(value);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -1038,10 +1300,10 @@ function FontPicker({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        side={docked ? 'left' : 'bottom'}
-        align={docked ? 'end' : 'start'}
+        side="bottom"
+        align="start"
         sideOffset={10}
-        className="w-80 p-2"
+        className="max-h-[min(70dvh,var(--radix-popover-content-available-height))] w-72 overflow-auto p-2"
       >
         <p className="px-2 pt-1 pb-2 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
           Writing font

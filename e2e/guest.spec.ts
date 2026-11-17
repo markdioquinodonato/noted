@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { closeEditor, expandNavigationSection, openNewEditor, showNoteTools } from './noteTools';
 
 const isMobile = (page: Page) => (page.viewportSize()?.width ?? 1000) < 768;
 
@@ -9,13 +10,7 @@ async function startAsGuest(page: Page) {
 }
 
 async function newNote(page: Page, title: string, body: string, opts: { autosave?: boolean } = {}) {
-  if (isMobile(page))
-    await page.getByRole('button', { name: 'New note', exact: true }).first().click();
-  else
-    await page
-      .getByRole('navigation', { name: 'Notes navigation' })
-      .getByRole('button', { name: 'New note' })
-      .click();
+  await openNewEditor(page);
   await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}/);
   await page.getByRole('textbox', { name: 'Note title' }).fill(title);
   await page.getByRole('textbox', { name: 'Note content' }).fill(body);
@@ -27,10 +22,6 @@ async function newNote(page: Page, title: string, body: string, opts: { autosave
   );
 }
 
-async function backToList(page: Page) {
-  if (isMobile(page)) await page.getByRole('button', { name: 'Back to notes list' }).click();
-}
-
 async function openNav(page: Page) {
   if (isMobile(page)) await page.getByRole('button', { name: 'Open navigation' }).click();
   return page.getByRole('navigation', { name: 'Notes navigation' });
@@ -40,13 +31,11 @@ test('guest can write without an account and notes survive a reload', async ({ p
   await startAsGuest(page);
   await newNote(page, 'Reload test ✓', 'Ünïcödé line one\nline two 日本語');
   await page.reload();
-  if (isMobile(page)) {
-    await expect(page.getByRole('textbox', { name: 'Note content' })).toHaveText(
-      'Ünïcödé line one\nline two 日本語',
-      { useInnerText: true },
-    );
-    await backToList(page);
-  }
+  await expect(page.getByRole('textbox', { name: 'Note content' })).toHaveText(
+    'Ünïcödé line one\nline two 日本語',
+    { useInnerText: true },
+  );
+  await closeEditor(page);
   await expect(page.getByTestId('note-list').getByText('Reload test ✓')).toBeVisible();
   // Fully close the browser context's page and reopen.
   const page2 = await page.context().newPage();
@@ -58,9 +47,9 @@ test('guest can write without an account and notes survive a reload', async ({ p
 test('edit, search, archive, trash, restore and permanent delete', async ({ page }) => {
   await startAsGuest(page);
   await newNote(page, 'Alpha', 'quick brown fox');
-  await backToList(page);
+  await closeEditor(page);
   await newNote(page, 'Beta', 'lazy dog');
-  await backToList(page);
+  await closeEditor(page);
 
   // Search by content
   await page.getByRole('searchbox', { name: /search notes/i }).fill('brown');
@@ -74,7 +63,7 @@ test('edit, search, archive, trash, restore and permanent delete', async ({ page
   await page.getByRole('button', { name: 'More note actions' }).click();
   await page.getByRole('menuitem', { name: 'Archive' }).click();
   await expect(page.getByText('Archived — hidden from your main notes.')).toBeVisible();
-  await backToList(page);
+  await closeEditor(page);
   await expect(page.getByTestId('note-row')).toHaveCount(1);
   let nav = await openNav(page);
   await nav.getByRole('button', { name: /^Archive/ }).click();
@@ -83,7 +72,7 @@ test('edit, search, archive, trash, restore and permanent delete', async ({ page
 
   // Trash Beta, then restore
   nav = await openNav(page);
-  await nav.getByRole('button', { name: /^All Notes/ }).click();
+  await nav.getByRole('button', { name: 'Notes', exact: true }).click();
   await page.getByTestId('note-row').filter({ hasText: 'Beta' }).click();
   await page.getByRole('button', { name: 'More note actions' }).click();
   await page.getByRole('menuitem', { name: 'Move to Trash' }).click();
@@ -108,6 +97,7 @@ test('edit, search, archive, trash, restore and permanent delete', async ({ page
 test('folders, tags, filters and folder deletion keeps notes', async ({ page }) => {
   await startAsGuest(page);
   let nav = await openNav(page);
+  await expandNavigationSection(nav, 'Folders');
   await nav.getByRole('button', { name: 'New folder' }).click();
   await page.getByLabel('Folder name').fill('Work');
   await page.getByRole('button', { name: 'Create' }).click();
@@ -116,15 +106,20 @@ test('folders, tags, filters and folder deletion keeps notes', async ({ page }) 
     await expect(page.getByRole('navigation', { name: 'Notes navigation' })).toBeHidden();
 
   await newNote(page, 'Quarterly plan', 'Goals for Q3');
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Edit tags' }).click();
   await page.getByPlaceholder('Find or create a tag…').fill('planning');
   await page.keyboard.press('Enter');
+  await expect(page.getByRole('option', { name: 'planning', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
   await page.keyboard.press('Escape');
-  await expect(page.getByText('#planning').first()).toBeVisible();
-  await backToList(page);
+  await closeEditor(page);
 
   // Duplicate folder names are rejected
   nav = await openNav(page);
+  await expandNavigationSection(nav, 'Folders');
   await nav.getByRole('button', { name: 'New folder' }).click();
   await page.getByLabel('Folder name').fill('  work ');
   await page.getByRole('button', { name: 'Create' }).click();
@@ -133,16 +128,19 @@ test('folders, tags, filters and folder deletion keeps notes', async ({ page }) 
 
   // Filter by tag
   nav = await openNav(page);
+  await expandNavigationSection(nav, 'Tags');
   await nav.getByRole('button', { name: /^planning/ }).click();
   await expect(page.getByTestId('note-row')).toHaveCount(1);
 
   // Delete the folder: the note survives as uncategorized
   nav = await openNav(page);
+  await expandNavigationSection(nav, 'Folders');
   await nav.getByRole('button', { name: 'Folder Work options' }).click();
   await page.getByRole('menuitem', { name: 'Delete' }).click();
   await expect(page.getByRole('alertdialog')).toContainText('will not be deleted');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete folder' }).click();
   nav = await openNav(page);
+  await expandNavigationSection(nav, 'Folders');
   await nav.getByRole('button', { name: /^Uncategorized/ }).click();
   await expect(page.getByTestId('note-row').filter({ hasText: 'Quarterly plan' })).toBeVisible();
 });
@@ -175,7 +173,7 @@ test('version history: checkpoint with Ctrl+S and restore', async ({ page }) => 
 
 test('unsaved edits survive a refresh (draft recovery) when autosave is off', async ({ page }) => {
   await startAsGuest(page);
-  await page.goto('/settings');
+  await page.goto('/settings?section=editor');
   await page.getByRole('switch', { name: 'Autosave' }).click();
   await expect(page.getByRole('switch', { name: 'Autosave' })).toHaveAttribute(
     'aria-checked',
@@ -254,7 +252,7 @@ test('layout has no horizontal overflow and is keyboard navigable', async ({ pag
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(0);
-  await backToList(page);
+  await closeEditor(page);
   // Ctrl/Cmd+F inside the note body is left to the browser; elsewhere it focuses note search.
   const search = page.getByRole('searchbox', { name: /search notes/i });
   await expect(search).toBeVisible();
@@ -265,13 +263,7 @@ test('layout has no horizontal overflow and is keyboard navigable', async ({ pag
 
 test('Enter in the title moves typing straight into the note body', async ({ page }) => {
   await startAsGuest(page);
-  if (isMobile(page))
-    await page.getByRole('button', { name: 'New note', exact: true }).first().click();
-  else
-    await page
-      .getByRole('navigation', { name: 'Notes navigation' })
-      .getByRole('button', { name: 'New note' })
-      .click();
+  await openNewEditor(page);
   const title = page.getByRole('textbox', { name: 'Note title' });
   await title.click();
   await page.keyboard.type('Quick title');
@@ -283,12 +275,12 @@ test('Enter in the title moves typing straight into the note body', async ({ pag
   );
 });
 
-test('Alt+N creates a new note from anywhere in the workspace', async ({ page }) => {
+test('Alt+N opens the focused composer from the library', async ({ page }) => {
   test.skip((page.viewportSize()?.width ?? 1000) < 768, 'keyboard shortcut is desktop-only');
   await startAsGuest(page);
   // Wait until the workspace (and its shortcut listener) is on screen, as a user would.
   await expect(page.getByRole('navigation', { name: 'Notes navigation' })).toBeVisible();
   await page.keyboard.press('Alt+n');
   await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}/);
-  await expect(page.getByRole('textbox', { name: 'Note title' })).toBeFocused();
+  await expect(page.getByRole('textbox', { name: 'Note content' })).toBeFocused();
 });

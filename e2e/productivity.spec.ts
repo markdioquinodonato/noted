@@ -1,3 +1,4 @@
+import { closeEditor, expandNavigationSection, openNewEditor, showNoteTools } from './noteTools';
 import { test, expect, type Page } from '@playwright/test';
 const mobile = (page: Page) => (page.viewportSize()?.width ?? 1000) < 768;
 async function start(page: Page) {
@@ -5,10 +6,7 @@ async function start(page: Page) {
   await page.getByRole('button', { name: 'Continue as Guest' }).click();
 }
 async function create(page: Page, title = 'Productivity', body = 'First thought') {
-  const button = mobile(page)
-    ? page.getByRole('button', { name: 'New note', exact: true }).first()
-    : page.getByRole('navigation').getByRole('button', { name: 'New note' });
-  await button.click();
+  await openNewEditor(page);
   await page.getByRole('textbox', { name: 'Note title' }).fill(title);
   await page.getByRole('textbox', { name: 'Note content' }).fill(body);
   await saved(page);
@@ -20,10 +18,7 @@ async function saved(page: Page) {
   );
 }
 async function nav(page: Page) {
-  if (mobile(page)) {
-    await page.getByRole('button', { name: 'Back to notes list' }).click();
-    await page.getByRole('button', { name: 'Open navigation' }).click();
-  }
+  if (mobile(page)) await page.getByRole('button', { name: 'Open navigation' }).click();
   return page.getByRole('navigation');
 }
 
@@ -33,6 +28,7 @@ test('rich formatting, checklist toggles, favorites, colors and duplication pers
   await start(page);
   await create(page);
   const body = page.getByRole('textbox', { name: 'Note content' });
+  await page.getByRole('button', { name: 'Format text', exact: true }).click();
   await body.selectText();
   await page.getByRole('button', { name: 'Bold (Ctrl+B)', exact: true }).click();
   await expect(body.locator('strong')).toHaveText('First thought');
@@ -42,10 +38,15 @@ test('rich formatting, checklist toggles, favorites, colors and duplication pers
   await body.locator('input[type=checkbox]').check();
   await expect(page.getByText(/1 of 1 tasks complete/)).toBeVisible();
   await saved(page);
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Favorite note', exact: true }).click();
   await saved(page);
+  await showNoteTools(page);
+  await page.getByRole('button', { name: 'Note color', exact: true }).click();
   await page.getByRole('radio', { name: 'Sage', exact: true }).click();
+  await page.keyboard.press('Escape');
   await saved(page);
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Font', exact: true }).click();
   await page.getByRole('radio', { name: 'Caveat', exact: true }).click();
   await expect(body).toHaveCSS('font-family', /Caveat/);
@@ -53,12 +54,16 @@ test('rich formatting, checklist toggles, favorites, colors and duplication pers
   await page.reload();
   await expect(body.locator('strong')).toHaveText('First thought');
   await expect(body.locator('input[type=checkbox]')).toBeChecked();
+  await showNoteTools(page);
+  await expect(page.getByRole('button', { name: 'Remove favorite' })).toBeVisible();
+  await page.getByRole('button', { name: 'Note color', exact: true }).click();
   await expect(page.getByRole('radio', { name: 'Sage', exact: true })).toHaveAttribute(
     'aria-checked',
     'true',
   );
-  await expect(page.getByRole('button', { name: 'Remove favorite' })).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(body).toHaveCSS('font-family', /Caveat/);
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Font', exact: true }).click();
   await expect(page.getByRole('radio', { name: 'Caveat', exact: true })).toHaveAttribute(
     'aria-checked',
@@ -68,8 +73,9 @@ test('rich formatting, checklist toggles, favorites, colors and duplication pers
   await page.getByRole('button', { name: 'More note actions' }).click();
   await page.getByRole('menuitem', { name: 'Duplicate note' }).click();
   await expect(page.getByText(/Duplicated as/)).toBeVisible();
-  const navigation = await nav(page);
-  await navigation.getByRole('button', { name: /^Favorites/ }).click();
+  await closeEditor(page);
+  await page.getByRole('button', { name: 'View options', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Favorites', exact: true }).click();
   await expect(page.getByTestId('note-row')).toHaveCount(2);
   await page.screenshot({
     path: `test-results/${mobile(page) ? 'mobile' : 'desktop'}-favorites.png`,
@@ -77,9 +83,12 @@ test('rich formatting, checklist toggles, favorites, colors and duplication pers
   });
 });
 
-test('real attachments upload, download, reload and deletion', async ({ page }) => {
+test('an attachment can be the first content of a note and persists after reload', async ({
+  page,
+}) => {
   await start(page);
-  await create(page, 'Files');
+  await openNewEditor(page);
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Attachments', exact: true }).click();
   await page.getByLabel('Attach files', { exact: true }).setInputFiles({
     name: 'private.txt',
@@ -95,6 +104,7 @@ test('real attachments upload, download, reload and deletion', async ({ page }) 
   for await (const chunk of stream) chunks.push(chunk as Buffer);
   expect(Buffer.concat(chunks).toString('utf8')).toBe('Private attachment ✓');
   await page.reload();
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Attachments', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Download private.txt' })).toBeVisible();
   await page.getByRole('button', { name: 'Delete attachment private.txt' }).click();
@@ -104,6 +114,7 @@ test('real attachments upload, download, reload and deletion', async ({ page }) 
 test('reminders, notifications, unavailable AI, and real sharing notice', async ({ page }) => {
   await start(page);
   await create(page, 'Due task');
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Reminder', exact: true }).click();
   await page.locator('input[type=datetime-local]').fill('2026-01-01T10:00');
   await page.getByRole('button', { name: 'Set reminder', exact: true }).click();
@@ -111,9 +122,11 @@ test('reminders, notifications, unavailable AI, and real sharing notice', async 
   await page.keyboard.press('Escape');
   await page.reload();
   await expect(page.getByText('Reminder: Due task', { exact: true })).toBeVisible();
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'AI Assistant', exact: true }).click();
   await expect(page.getByRole('dialog')).toContainText('AI is unavailable');
   await page.keyboard.press('Escape');
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   // Guests cannot share: they are asked to log in instead of seeing sharing controls.
   const shareDialog = page.getByRole('dialog');
@@ -122,6 +135,7 @@ test('reminders, notifications, unavailable AI, and real sharing notice', async 
   await expect(shareDialog.getByLabel('Collaborator email')).toHaveCount(0);
   await expect(shareDialog.getByRole('button', { name: 'Share note' })).toHaveCount(0);
   await page.keyboard.press('Escape');
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Reminder', exact: true }).click();
   await page.getByRole('button', { name: 'Complete', exact: true }).click();
   await expect(page.getByText('Completed ·', { exact: false })).toBeVisible();
@@ -144,12 +158,12 @@ test('Markdown and DOCX documents import as genuine content', async ({ page }) =
   const download = await downloading;
   const file = await download.path();
   expect(file).toBeTruthy();
+  await closeEditor(page);
   await page.getByTestId('import-txt-input').setInputFiles({
     name: 'Returned.docx',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     buffer: await (await import('node:fs/promises')).readFile(file!),
   });
-  if (mobile(page)) await page.getByRole('button', { name: 'Back to notes list' }).click();
   await page.getByTestId('note-row').filter({ hasText: 'Returned' }).click();
   await expect(body).toContainText('A bold idea');
 });
@@ -233,8 +247,9 @@ test('PDF documents import readable text using the real PDF parser', async ({ pa
 test('folder appearance and linked-note navigation work after reload', async ({ page }) => {
   await start(page);
   await create(page, 'Target note');
-  if (mobile(page)) await page.getByRole('button', { name: 'Back to notes list' }).click();
+  await closeEditor(page);
   await create(page, 'Source note');
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Linked notes', exact: true }).click();
   await page.getByPlaceholder('Find a note to link…').fill('Target');
   await page.getByRole('dialog').getByRole('button', { name: 'Target note', exact: true }).click();
@@ -246,6 +261,7 @@ test('folder appearance and linked-note navigation work after reload', async ({ 
   await expect(link).toHaveAttribute('href', /^\/notes\//);
   await link.click({ modifiers: ['Control'] });
   await expect(page.getByRole('textbox', { name: 'Note title' })).toHaveValue('Target note');
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Linked notes', exact: true }).click();
   await expect(
     page
@@ -253,7 +269,9 @@ test('folder appearance and linked-note navigation work after reload', async ({ 
       .getByRole('button', { name: 'Backlink from Source note', exact: true }),
   ).toBeVisible();
   await page.keyboard.press('Escape');
+  await closeEditor(page);
   const navigation = await nav(page);
+  await expandNavigationSection(navigation, 'Folders');
   await navigation.getByRole('button', { name: 'New folder', exact: true }).click();
   await page.getByLabel('Folder name').fill('Journal');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
@@ -273,7 +291,7 @@ test('folder appearance and linked-note navigation work after reload', async ({ 
   await expect(page.getByLabel('Folder icon', { exact: true })).toHaveValue('book');
   await page.keyboard.press('Escape');
   await page.goto('/notes?dashboard=1');
-  await expect(page.getByText('Welcome to Noted', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Notes', exact: true })).toBeVisible();
   await page.screenshot({
     path: `test-results/${mobile(page) ? 'mobile' : 'desktop'}-dashboard.png`,
     fullPage: true,

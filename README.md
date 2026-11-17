@@ -103,7 +103,7 @@ Import: TXT, Markdown, DOCX and readable PDF. Export: TXT/ZIP, Markdown, DOCX, a
 
 Production builds include an app-shell service worker. Guest reload/editing works offline once the shell is cached. Signed-in users can edit previously opened owned notes using scoped snapshots and queued text drafts; cloud creation, organization and uploads require connectivity. Shared notes are excluded from the offline snapshot cache. No encryption or password-locking is advertised.
 
-Reminders are checked while Noted is open. Closed-app delivery is not implemented; it requires a scheduled backend and push/email delivery. Voice recording uses MediaRecorder. Live dictation is browser-dependent and may use the browser vendor’s speech service; transcription of existing audio files is not implemented.
+Reminders are checked while Noted is open. Closed-app delivery is not implemented; it requires a scheduled backend and push/email delivery. Voice recording uses MediaRecorder. Live dictation is browser-dependent and may use the browser vendor’s speech service. Recorded-audio transcription now supports Tagalog, English and Taglish through a server-side Deepgram Nova-3 integration, with strict/clean modes, review flags, resumable chunks, and a synchronized editor. See [transcription setup, evaluation and limitations](docs/TRANSCRIPTION.md). Actual speech accuracy is not yet verified; authenticated server configuration is required for AI processing.
 
 ### Optional AI deployment
 
@@ -145,7 +145,7 @@ The five skipped browser cases are the four hosted-cloud cases without credentia
 
 ## Login, Guest Mode and camera scanning
 
-First-time visitors can choose **Log In**, **Create an Account**, or **Continue as Guest**. Guest Mode opens the dashboard and keeps notes in IndexedDB without Supabase. The account menu provides optional login/registration, import/export and local-data information. Settings also supports signing out directly into Guest Mode.
+First-time visitors can choose **Log In**, **Create an Account**, or **Continue as Guest**. Guest Mode opens Notes and keeps notes in IndexedDB. The **Profile** menu provides account access, Settings, import, export, and guest data information. **Sign Out** returns to Welcome, where **Continue as Guest** is available separately.
 
 The camera text scanner recognizes printed English locally using Tesseract, with capture, image selection, editable results and saving as a note. `npm run dev` and `npm run build` automatically prepare packaged worker/model assets; recognition works offline once the production app cache is installed. No images are uploaded. Use HTTPS (or localhost) for the camera.
 

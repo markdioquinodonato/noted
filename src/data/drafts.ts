@@ -1,4 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type { NoteComposition } from '@/features/notes/noteComposition';
 
 /**
  * Crash-safety net: every unsaved edit is mirrored here (debounced) before it
@@ -13,6 +14,8 @@ export interface DraftRecord {
   content: string;
   /** updatedAt of the stored note this draft was based on. */
   baseUpdatedAt: string;
+  /** Present until this new note has been created in its repository. */
+  creation?: NoteComposition;
   savedAt: number;
 }
 

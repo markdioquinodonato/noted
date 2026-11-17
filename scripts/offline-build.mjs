@@ -2,16 +2,27 @@ import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 
-const root = resolve('dist');
+const root = resolve(process.argv[2] ?? 'dist');
 async function walk(dir) {
   const result = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) result.push(...(await walk(path)));
-    else if (!['sw.js', '_headers', '_redirects'].includes(entry.name)) result.push(path);
+    else if (!['sw.js', '_headers', '_redirects', 'release.json'].includes(entry.name))
+      result.push(path);
   }
   return result;
 }
+const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+const commit = process.env.CF_PAGES_COMMIT_SHA;
+await writeFile(
+  join(root, 'release.json'),
+  JSON.stringify({
+    version: pkg.version,
+    builtAt: new Date().toISOString(),
+    commit: /^[a-f0-9]{7,64}$/i.test(commit ?? '') ? commit : undefined,
+  }),
+);
 const files = await walk(root),
   hash = createHash('sha256');
 for (const file of files) hash.update(await readFile(file));

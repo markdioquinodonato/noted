@@ -161,7 +161,7 @@ site_url = "https://noted-ph.pages.dev"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://noted-ph.pages.dev/auth/callback", "http://localhost:5173/auth/callback", "http://localhost:5174/auth/callback"]
+additional_redirect_urls = ["https://noted-ph.pages.dev/auth/callback", "https://noted-ph.pages.dev/**", "http://localhost:5173/auth/callback", "http://localhost:5174/auth/callback"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -244,6 +244,11 @@ otp_expiry = 3600
 # pass = "env(SENDGRID_API_KEY)"
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
+
+# Optional custom template requires provider entitlement/custom SMTP on hosted projects.
+# [auth.email.template.magic_link]
+# subject = "Your Noted sign-in link"
+# content_path = "./supabase/templates/magic_link.html"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
@@ -420,3 +425,14 @@ enabled = true
 # formatted with uppercase keywords, indent 2, max width 180, trailing commas,
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
+
+[functions.transcribe]
+verify_jwt = true
+
+[functions.admin-providers]
+verify_jwt = false
+
+# Guest operational reports are public, bounded and content-free. Authenticated
+# identities are independently verified inside the handler.
+[functions.app-events]
+verify_jwt = false

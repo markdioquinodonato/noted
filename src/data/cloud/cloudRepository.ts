@@ -1,4 +1,5 @@
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
+import { deleteNoteTranscript } from '@/features/transcription/storage';
 import { offlineCache } from '@/data/offlineCache';
 import { computeCounts, queryNotes } from '@/domain/query';
 import { isNetworkError } from '@/domain/types';
@@ -283,6 +284,7 @@ export class CloudNotesRepository implements NotesRepository {
       await this.setNoteTags(note.id, input.tagIds);
       note.tagIds = [...new Set(input.tagIds)].sort();
     }
+    await offlineCache.note(this.scope, note).catch(() => undefined);
     return note;
   }
 
@@ -333,6 +335,7 @@ export class CloudNotesRepository implements NotesRepository {
       if (error) throw new Error('Could not remove attached files. Retry deletion.');
     }
     await this.run(this.sb.from('notes').delete().eq('id', id).not('deleted_at', 'is', null));
+    await deleteNoteTranscript(this.scope, id);
     await offlineCache.write(this.scope, `note:${id}`, null).catch(() => undefined);
   }
 

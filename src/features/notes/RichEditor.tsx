@@ -114,22 +114,22 @@ export interface RichEditorHandle {
 interface Props {
   initialContent: string;
   readOnly: boolean;
+  showFormatting: boolean;
   fontSize: number;
   onChange(content: string): void;
   onBlur(): void;
-  /** Extra actions pinned to the right end of the formatting toolbar. */
-  trailing?: ReactNode;
+  autoFocus?: boolean;
   /** Writing font id for this note; saved with the content. */
   font?: string;
 }
 
 const editorExtensions = [
   ...richExtensions,
-  Placeholder.configure({ placeholder: 'Start writing… or scan text with your camera' }),
+  Placeholder.configure({ placeholder: 'Start writing…' }),
 ];
 
 export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
-  { initialContent, readOnly, fontSize, onChange, onBlur, trailing, font },
+  { initialContent, readOnly, showFormatting, fontSize, onChange, onBlur, autoFocus, font },
   ref,
 ) {
   const navigate = useNavigate();
@@ -144,6 +144,7 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
     extensions: editorExtensions,
     content: readRich(initialContent)?.doc ?? textDocument(initialContent),
     editable: !readOnly,
+    autofocus: autoFocus ? 'start' : false,
     editorProps: {
       handleClick: (_view, _pos, event) => {
         const anchor = (event.target as HTMLElement).closest('a');
@@ -159,7 +160,7 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
         role: 'textbox',
         'aria-label': 'Note content',
         'aria-multiline': 'true',
-        class: 'noted-prose outline-none min-h-[45vh]',
+        class: 'noted-prose outline-none',
       },
     },
     onUpdate: ({ editor: e }) =>
@@ -247,9 +248,13 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
   collect(editor.getJSON() as JSONContent);
   return (
     <>
-      <div className="sticky top-3 z-10 -mx-2 mb-6 flex max-w-[calc(100%+1rem)] items-center self-start gap-1 rounded-2xl border bg-background/85 p-1 shadow-lg shadow-slate-900/[0.06] backdrop-blur-xl dark:shadow-black/30">
+      <div
+        id="noted-text-formatting"
+        hidden={!showFormatting}
+        className="noted-formatting sticky top-0 z-10 mb-5 w-full self-start"
+      >
         <div
-          className="flex min-w-0 flex-1 items-center overflow-x-auto scrollbar-none"
+          className="noted-formatting-actions flex min-w-0 flex-1 flex-wrap items-center"
           role="toolbar"
           aria-label="Text formatting"
         >
@@ -437,7 +442,6 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
           {action('Undo', <Undo2 />, () => editor.chain().focus().undo().run())}
           {action('Redo', <Redo2 />, () => editor.chain().focus().redo().run())}
         </div>
-        {trailing && <div className="flex shrink-0 items-center pl-1">{trailing}</div>}
       </div>
       {tasks.length > 0 && (
         <p className="mb-3 text-xs text-muted-foreground" role="status">
@@ -450,7 +454,7 @@ export const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEdito
         style={{
           fontSize: Math.round(fontSize * writing.scale * 10) / 10,
           fontFamily: writing.family,
-          lineHeight: 1.75,
+          lineHeight: 1.65,
         }}
       />
       <Dialog open={linkOpen} onOpenChange={setLinkOpen}>

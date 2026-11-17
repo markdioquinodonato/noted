@@ -18,6 +18,7 @@ export interface ReleaseInfo {
   version: string;
   publishedAt: string | null;
   pageUrl: string;
+  notes?: string;
   installers: Partial<Record<InstallerKey, Installer>>;
 }
 
@@ -35,6 +36,7 @@ interface GitHubRelease {
   prerelease: boolean;
   html_url: string;
   published_at: string | null;
+  body?: string;
   assets: GitHubAsset[];
 }
 
@@ -105,4 +107,29 @@ export async function fetchLatestRelease(
 export function formatSize(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+export async function fetchReleaseHistory(
+  repo: string,
+  signal?: AbortSignal,
+): Promise<ReleaseInfo[]> {
+  const response = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=30`, {
+    signal,
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!response.ok) throw new Error('Published GitHub releases are unavailable.');
+  const releases = (await response.json()) as GitHubRelease[];
+  return releases
+    .filter(
+      (r) =>
+        !r.draft && !r.prerelease && r.html_url.startsWith(`https://github.com/${repo}/releases/`),
+    )
+    .sort((a, b) => (b.published_at ?? '').localeCompare(a.published_at ?? ''))
+    .map((r) => ({
+      version: r.tag_name.replace(/^v/, ''),
+      publishedAt: r.published_at,
+      pageUrl: r.html_url,
+      notes: r.body,
+      installers: pickInstallers(repo, r.assets ?? []),
+    }));
 }

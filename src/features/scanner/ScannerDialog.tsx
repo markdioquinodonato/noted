@@ -41,15 +41,18 @@ export function ScannerDialog({
   open,
   onOpenChange,
   onInsert,
+  onCloseAutoFocus,
 }: {
   open: boolean;
   onOpenChange(open: boolean): void;
   onInsert(text: string): Promise<void> | void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
+        onCloseAutoFocus={onCloseAutoFocus}
         className="flex h-[100dvh] max-h-[100dvh] w-full max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-[min(860px,92dvh)] sm:max-w-2xl sm:rounded-2xl sm:border"
       >
         <DialogTitle className="sr-only">Scan text with camera</DialogTitle>

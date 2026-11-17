@@ -1,7 +1,7 @@
 {
   "name": "smart-notepad",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:db": "vitest run tests/db",
+    "test:transcription:accuracy": "node scripts/evaluate-transcription.mjs",
     "test:e2e": "playwright test",
     "predev": "node scripts/prepare-ocr.mjs",
     "prebuild": "node scripts/prepare-ocr.mjs",
@@ -65,6 +66,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router": "^8.5.1",
+    "recharts": "^3.10.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.0",
     "tesseract.js": "^7.0.0"

@@ -20,7 +20,7 @@ interface Item {
   title: string;
   scheduledAt: string;
 }
-export function NotificationInbox() {
+export function NotificationInbox({ showWhenEmpty = true }: { showWhenEmpty?: boolean }) {
   const { repo } = useRepo();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -83,11 +83,14 @@ export function NotificationInbox() {
       return result.sort((a, b) => b.scheduledAt.localeCompare(a.scheduledAt));
     },
   });
+  if (!showWhenEmpty && !open && !items.data?.length) return null;
+
   return (
     <>
       <Button
         variant="ghost"
         size="icon"
+        className="relative"
         aria-label={`Notifications${items.data?.length ? ` (${items.data.length})` : ''}`}
         onClick={() => {
           setOpen(true);
@@ -95,7 +98,11 @@ export function NotificationInbox() {
         }}
       >
         <Bell />
-        {items.data?.length ? <span className="text-xs">{items.data.length}</span> : null}
+        {items.data?.length ? (
+          <span className="absolute top-0.5 right-0 grid min-w-4 place-items-center rounded-full bg-primary px-1 text-[0.625rem] leading-4 text-primary-foreground">
+            {items.data.length > 99 ? '99+' : items.data.length}
+          </span>
+        ) : null}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

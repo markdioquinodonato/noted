@@ -1,3 +1,4 @@
+import { openNewEditor, showNoteTools } from './noteTools';
 import { test, expect } from '@playwright/test';
 // Browser APIs receive Chromium's synthetic microphone, without accessing real hardware.
 test.use({
@@ -7,13 +8,14 @@ test.use({
 test('records, pauses, previews and persistently attaches real audio bytes', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue as Guest' }).click();
-  await page.getByRole('button', { name: 'New note', exact: true }).first().click();
+  await openNewEditor(page);
   await page.getByRole('textbox', { name: 'Note title' }).fill('Voice journal');
   await page.getByRole('textbox', { name: 'Note content' }).fill('Audio from the browser recorder');
   await expect(page.getByTestId('save-status').filter({ visible: true })).toHaveAttribute(
     'data-status',
     'saved',
   );
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Voice', exact: true }).click();
   await page.getByRole('button', { name: 'Start recording', exact: true }).click();
   await expect(page.getByText('Microphone recording…')).toBeVisible();
@@ -27,6 +29,7 @@ test('records, pauses, previews and persistently attaches real audio bytes', asy
   await expect(page.getByText('Voice recording attached', { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.reload();
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Attachments', exact: true }).click();
   const button = page.getByRole('button', { name: /Download Voice-/ });
   await expect(button).toBeVisible();

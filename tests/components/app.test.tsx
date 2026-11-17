@@ -32,12 +32,13 @@ describe('Welcome & guest access', () => {
     await user.click(await screen.findByRole('button', { name: /continue as guest/i }));
     expect(router.state.location.pathname).toBe('/notes');
     expect(localStorage.getItem('noted:mode')).toBe('guest');
-    expect(await screen.findByText(/write your first note/i)).toBeInTheDocument();
-    expect(screen.getByText(/only in this browser/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /guest account menu/i })).toHaveAttribute(
-      'title',
-      expect.stringMatching(/saved only in this browser/i),
-    );
+    expect(await screen.findByRole('button', { name: /^Write something…?$/i })).toBeInTheDocument();
+    const profile = screen.getByRole('button', { name: 'Profile' });
+    expect(profile).toHaveAttribute('title', expect.stringMatching(/saved only in this browser/i));
+    await user.click(profile);
+    expect(
+      within(await screen.findByRole('menu')).getByText('Saved in this browser'),
+    ).toBeVisible();
   });
 });
 
@@ -45,8 +46,7 @@ describe('Guest notes workspace', () => {
   it('creates a note, autosaves it to IndexedDB, and shows it in the list with counters', async () => {
     const user = userEvent.setup();
     const { router } = renderAt('/notes');
-    const nav = await screen.findByRole('navigation', { name: /notes navigation/i });
-    await user.click(within(nav).getByRole('button', { name: /new note/i }));
+    await user.click(await screen.findByRole('button', { name: /^Write something…?$/i }));
     await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/notes\/.+/));
 
     const title = await screen.findByRole('textbox', { name: /note title/i });
@@ -55,6 +55,8 @@ describe('Guest notes workspace', () => {
     body.innerHTML = '<p>Milk and eggs</p>';
     fireEvent.input(body);
     await waitFor(() => expect(body).toHaveTextContent('Milk and eggs'));
+    await user.click(screen.getByRole('button', { name: 'More note actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Show note details' }));
     await waitFor(() => expect(screen.getByTestId('word-count')).toHaveTextContent('3 words'));
 
     expect(screen.getByTestId('word-count')).toHaveTextContent('3 words');
@@ -64,13 +66,17 @@ describe('Guest notes workspace', () => {
       () => expect(screen.getAllByTestId('save-status')[0]).toHaveAttribute('data-status', 'saved'),
       { timeout: 4000 },
     );
-    const list = screen.getByTestId('note-list');
-    await waitFor(() => expect(within(list).getByText('Shopping')).toBeInTheDocument());
+    expect(screen.queryByRole('searchbox', { name: /search notes/i })).not.toBeInTheDocument();
 
     const id = router.state.location.pathname.split('/').pop()!;
     const stored = await new LocalNotesRepository().getNote(id);
     expect(stored?.title).toBe('Shopping');
     expect(plainText(stored!.content)).toBe('Milk and eggs');
+
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/notes'));
+    const list = await screen.findByTestId('note-list');
+    await waitFor(() => expect(within(list).getByText('Shopping')).toBeVisible());
   });
 
   it('searches notes by content', async () => {
@@ -89,6 +95,7 @@ describe('Guest notes workspace', () => {
   it('creating a folder via dialog, Escape closes dialogs', async () => {
     const user = userEvent.setup();
     renderAt('/notes');
+    await user.click(await screen.findByRole('button', { name: 'Folders' }));
     await user.click(await screen.findByRole('button', { name: /new folder/i }));
     const dialog = await screen.findByRole('dialog');
     await user.keyboard('{Escape}');

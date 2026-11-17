@@ -95,7 +95,7 @@ await step('web content stays out of the status bar and navigation bar', async (
 await step('guest can create and autosave a note', async () => {
   await page.getByRole('button', { name: 'Continue as Guest' }).click();
   await expect(page).toHaveURL(/\/notes/);
-  await page.getByRole('button', { name: 'New note', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Write something', exact: true }).click();
   await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}/);
   await page.getByRole('textbox', { name: 'Note title' }).fill(title);
   await page.getByRole('textbox', { name: 'Note content' }).fill('Typed on Android ✓ 日本語');
@@ -126,8 +126,8 @@ await step('note survives closing and reopening the app', async () => {
 });
 
 await step('Android back button navigates inside the app instead of quitting', async () => {
-  const back = page.getByRole('button', { name: 'Back to notes list' });
-  if (!(await back.isVisible())) await page.getByText(title).first().click();
+  const done = page.getByRole('button', { name: 'Done', exact: true });
+  if (!(await done.isVisible())) await page.getByText(title).first().click();
   await expect(page).toHaveURL(/\/notes\/[0-9a-f-]{36}/);
   const before = page.url();
   await shell('input keyevent 4'); // KEYCODE_BACK
@@ -164,7 +164,7 @@ await step('export as .txt opens the Android save dialog and saves', async () =>
 
 await step('settings: "Check for updates" works on Android', async () => {
   await page.keyboard.press('Escape');
-  await page.goto(new URL('/settings', page.url()).href);
+  await page.goto(new URL('/settings?section=about', page.url()).href);
   await expect(page.getByRole('button', { name: /Check for updates/ })).toBeVisible({
     timeout: 20_000,
   });
@@ -177,7 +177,7 @@ await step('settings: "Check for updates" works on Android', async () => {
 });
 
 await step('status/navigation bar strips follow the app theme (dark mode)', async () => {
-  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.goto(new URL('/settings', page.url()).href);
   await page.getByRole('radio', { name: 'Dark', exact: true }).click();
   await expect(page.locator('html.dark')).toHaveCount(1, { timeout: 20_000 });
   await sleep(1500);

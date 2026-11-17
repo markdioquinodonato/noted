@@ -1,0 +1,341 @@
+.noted-settings {
+  --settings-header: 4rem;
+  --settings-width: 67rem;
+  --settings-inset: clamp(1rem, 4vw, 2rem);
+  min-block-size: 100dvh;
+  background: color-mix(in oklab, var(--background) 84%, var(--muted));
+  color: var(--foreground);
+}
+
+.noted-settings-header {
+  position: sticky;
+  z-index: 10;
+  inset-block-start: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+
+.noted-settings-bar,
+.noted-settings-shell {
+  width: min(100% - 2 * var(--settings-inset), var(--settings-width));
+  margin-inline: auto;
+}
+
+.noted-settings-bar {
+  display: flex;
+  min-block-size: var(--settings-header);
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.noted-settings-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.noted-settings-title h1 {
+  font-size: 1.125rem;
+  font-weight: 660;
+  letter-spacing: -0.025em;
+}
+
+.noted-settings-shell {
+  display: grid;
+  grid-template-columns: minmax(12rem, 14rem) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(1.25rem, 3.75vw, 3rem);
+  padding-block: clamp(1.3rem, 4.6vw, 2.75rem) 3rem;
+}
+
+.noted-settings-nav {
+  position: sticky;
+  inset-block-start: calc(var(--settings-header) + 1rem);
+  display: grid;
+  gap: 0.25rem;
+  padding-inline-end: 0.75rem;
+  border-inline-end: 1px solid var(--border);
+}
+
+.noted-settings-nav a {
+  display: flex;
+  min-block-size: 2.6rem;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  border-inline-start: 2px solid transparent;
+  border-radius: 0.6rem;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+  font-weight: 545;
+}
+
+.noted-settings-nav a:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.noted-settings-nav a[aria-current='page'] {
+  border-inline-start-color: var(--primary);
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-weight: 650;
+}
+
+.noted-settings-nav svg,
+.noted-settings-heading > svg {
+  inline-size: 1.1rem;
+  block-size: 1.1rem;
+  flex: none;
+}
+
+.noted-settings-mobile-nav {
+  display: none;
+}
+
+.noted-settings-panel {
+  display: grid;
+  min-inline-size: 0;
+  gap: 1rem;
+}
+
+.noted-settings-heading {
+  display: flex;
+  min-block-size: 2.6rem;
+  align-items: center;
+  gap: 0.65rem;
+  padding-inline: 0.15rem;
+}
+
+.noted-settings-heading > svg {
+  color: var(--primary);
+}
+
+.noted-settings-heading h2 {
+  margin-inline-end: auto;
+  font-size: clamp(1.25rem, 2.4vw, 1.55rem);
+  font-weight: 680;
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+}
+
+.noted-settings-feedback {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.noted-settings-group {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 1px 2px rgb(14 25 42 / 5%);
+}
+
+.noted-settings-group > header {
+  padding: 1.05rem var(--settings-inset) 0.75rem;
+}
+
+.noted-settings-group h3 {
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+  font-weight: 665;
+}
+
+.noted-settings-copy .noted-settings-hint {
+  margin-block-start: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.81rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.noted-settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem 1.15rem;
+  padding: 0.8rem var(--settings-inset);
+  border-top: 1px solid var(--border);
+}
+
+.noted-settings-copy {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.noted-settings-copy > :is(p:first-child, label) {
+  color: var(--foreground);
+  font-size: 0.9rem;
+  font-weight: 580;
+  line-height: 1.45;
+}
+
+.noted-settings-control {
+  display: flex;
+  min-inline-size: 0;
+  justify-content: flex-end;
+}
+
+.noted-settings-status {
+  max-inline-size: 100%;
+  padding: 0.25rem 0.55rem;
+  border-radius: 0.45rem;
+  background: var(--muted);
+  color: var(--foreground);
+  font-size: 0.75rem;
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.noted-settings-name {
+  display: flex;
+  inline-size: min(17.5rem, 100%);
+  min-inline-size: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.noted-settings-name input {
+  min-inline-size: 0;
+}
+
+.noted-settings-select {
+  inline-size: min(13rem, 100%);
+}
+
+.noted-settings-themes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0 var(--settings-inset) var(--settings-inset);
+  border: 0;
+}
+
+.noted-settings-themes label {
+  position: relative;
+  min-inline-size: 0;
+  cursor: pointer;
+}
+
+.noted-settings-themes input {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.noted-settings-themes label > span {
+  display: flex;
+  min-block-size: 3.2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  color: var(--foreground);
+  font-size: 0.85rem;
+  font-weight: 550;
+}
+
+.noted-settings-themes label:hover > span {
+  background: var(--muted);
+}
+
+.noted-settings-themes input:checked + span {
+  border-color: var(--primary);
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.noted-settings-themes input:disabled + span {
+  opacity: 0.72;
+}
+
+.noted-settings-themes svg {
+  inline-size: 1rem;
+  block-size: 1rem;
+  flex: none;
+}
+
+.noted-settings-nav a:focus-visible,
+.noted-settings-mobile-nav select:focus-visible,
+.noted-settings-themes input:focus-visible + span {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (max-width: 48rem) {
+  .noted-settings {
+    --settings-header: 3.5rem;
+  }
+
+  .noted-settings-shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+
+  .noted-settings-nav {
+    display: none;
+  }
+
+  .noted-settings-mobile-nav {
+    position: relative;
+    display: block;
+  }
+
+  .noted-settings-mobile-nav select {
+    inline-size: 100%;
+    min-block-size: 2.75rem;
+    appearance: none;
+    padding-inline: 0.75rem 2rem;
+    border: 1px solid var(--border);
+    border-radius: 0.65rem;
+    background: var(--card);
+    color: var(--foreground);
+    font-size: 0.94rem;
+    font-weight: 570;
+  }
+
+  .noted-settings-mobile-nav > svg {
+    position: absolute;
+    inset-block-start: 0.85rem;
+    inset-inline-end: 0.75rem;
+    inline-size: 1rem;
+    block-size: 1rem;
+    color: var(--muted-foreground);
+    pointer-events: none;
+  }
+}
+
+@media (max-width: 29rem) {
+  .noted-settings-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .noted-settings-control {
+    justify-content: flex-start;
+  }
+
+  .noted-settings-control button,
+  .noted-settings-control a,
+  .noted-settings-name button {
+    min-block-size: 2.75rem;
+  }
+
+  .noted-settings-control [role='switch'] {
+    min-block-size: unset;
+  }
+
+  .noted-settings-themes label > span {
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+}

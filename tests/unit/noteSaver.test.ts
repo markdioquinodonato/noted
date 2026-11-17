@@ -174,6 +174,33 @@ describe('NoteSaver', () => {
     expect(d.map.has('n1')).toBe(false);
   });
 
+  it('requires a fresh backup when a newer edit arrives during a draft write', async () => {
+    const f = fakeRepo();
+    let finishFirstWrite!: () => void;
+    const put = vi
+      .fn<DraftSink['put']>()
+      .mockImplementationOnce(() => new Promise<void>((resolve) => (finishFirstWrite = resolve)))
+      .mockResolvedValue(undefined);
+    const s = new NoteSaver('n1', makeNote(), {
+      repo: f.repo,
+      drafts: { put, clear: vi.fn() },
+      autosave: false,
+      draftDelayMs: 50,
+    });
+    s.edit({ content: 'first' });
+    await vi.advanceTimersByTimeAsync(50);
+    s.edit({ content: 'second' });
+    finishFirstWrite();
+    await flush();
+    expect(s.getState().localDraftSaved).not.toBe(true);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(put).toHaveBeenLastCalledWith(expect.objectContaining({ content: 'second' }));
+    expect(s.getState().localDraftSaved).toBe(true);
+    s.edit({ content: 'third' });
+    expect(s.getState().localDraftSaved).not.toBe(true);
+    await s.suspend();
+  });
+
   it('goes offline without losing text and saves when the connection returns', async () => {
     const f = fakeRepo();
     const d = memDrafts();

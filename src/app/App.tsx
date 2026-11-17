@@ -18,6 +18,9 @@ import {
 import { Workspace } from '@/features/notes/Workspace';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { ImportPage } from '@/features/migration/ImportPage';
+import { adminRoutes } from '@/features/admin/routes';
+import { AdminGate } from '@/features/admin/AdminGate';
+import { OperationalTelemetry } from '@/features/admin/OperationalTelemetry';
 import { RepositoryProvider } from './RepositoryProvider';
 
 import { createQueryClient } from './queryClient';
@@ -57,6 +60,7 @@ function Shell() {
       <RepositoryProvider>
         <TooltipProvider delayDuration={400}>
           <Outlet />
+          <OperationalTelemetry />
           <DownloadDialogHost />
           <Toaster position="bottom-center" closeButton />
         </TooltipProvider>
@@ -80,6 +84,15 @@ export const routes = [
       { path: '/notes', element: <Workspace /> },
       { path: '/notes/:noteId', element: <Workspace /> },
       { path: '/settings', element: <SettingsPage /> },
+      {
+        path: '/admin',
+        element: (
+          <RequireAuth>
+            <AdminGate />
+          </RequireAuth>
+        ),
+        children: adminRoutes,
+      },
       {
         path: '/import',
         element: (

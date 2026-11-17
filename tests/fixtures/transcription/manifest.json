@@ -1,0 +1,6 @@
+{
+  "accuracyVerified": false,
+  "targetWer": 0.05,
+  "requiredConditions": ["clear-tagalog", "clear-english", "natural-taglish", "filipino-accent", "fast-conversation", "multiple-speakers", "background-noise", "long-recording", "technical-terms", "quiet-speech"],
+  "recordings": []
+}

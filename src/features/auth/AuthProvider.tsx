@@ -11,7 +11,8 @@ import {
   type ReactNode,
 } from 'react';
 import type { AuthError, Session, User, SupabaseClient } from '@supabase/supabase-js';
-import { siteUrl, supabase } from '@/lib/supabase';
+import { requestPasswordRecovery, siteUrl, supabase } from '@/lib/supabase';
+import { allowTranscripts } from '@/features/transcription/storage';
 
 export interface AuthContextValue {
   client: SupabaseClient | null;
@@ -51,8 +52,10 @@ export function authErrorMessage(err: unknown): string {
     return 'An account with this email already exists. Try logging in.';
   if (code === 'weak_password' || /password should/i.test(msg))
     return 'Please choose a stronger password (at least 8 characters).';
-  if (code === 'over_email_send_rate_limit' || /rate limit/i.test(msg))
-    return 'Too many attempts. Please wait a minute and try again.';
+  if (code === 'over_email_send_rate_limit' || /email.*rate limit/i.test(msg))
+    return 'Email delivery is temporarily limited. Please try again later; waiting one minute may not be enough.';
+  if (code === 'over_request_rate_limit' || /rate limit/i.test(msg))
+    return 'Too many requests. Wait a few minutes before trying again.';
   if (code === 'same_password') return 'Your new password must be different from the old one.';
   // The database rejects non-Gmail sign-ups; Supabase Auth surfaces that as a generic DB error.
   if (/gmail|database error (saving new|updating) user/i.test(msg))
@@ -73,16 +76,21 @@ export function AuthProvider({
   const [recovery, setRecovery] = useState(false);
 
   const sessionRef = useRef<Session | null>(null);
+  const authRevision = useRef(0);
   useEffect(() => {
     if (!client) return;
     let active = true,
       events = 0;
     const accept = (next: Session | null) => {
+      authRevision.current++;
       const previous = sessionRef.current;
       sessionRef.current = next;
       if (previous?.user.id && previous.user.id !== next?.user.id)
         void leaveAccount(previous.user.id).catch(() => undefined);
-      if (next?.user.id) offlineCache.allow(next.user.id);
+      if (next?.user.id) {
+        offlineCache.allow(next.user.id);
+        allowTranscripts(next.user.id);
+      }
       setSession(next);
       setLoading(false);
     };
@@ -158,19 +166,29 @@ export function AuthProvider({
           throw new Error(
             'Local backup is unavailable. Save or download your pending edits before signing out.',
           );
+        const old = sessionRef.current?.user.id ?? session?.user.id;
         const { error } = await client.auth.signOut({ scope: 'local' });
         if (error) throw new Error('Could not sign out. Check your connection and try again.');
-        const old = sessionRef.current?.user.id ?? session?.user.id;
-        if (old) await leaveAccount(old).catch(() => undefined);
-        sessionRef.current = null;
-        setSession(null);
-        setRecovery(false);
+        const revision = authRevision.current;
+        // SIGNED_OUT normally triggers accept() and cleanup. Avoid a duplicate
+        // cleanup that could block a newer session while the first purge runs.
+        if (old && sessionRef.current?.user.id === old)
+          await leaveAccount(old).catch(() => undefined);
+        if (
+          authRevision.current === revision &&
+          (!sessionRef.current || sessionRef.current.user.id === old)
+        ) {
+          sessionRef.current = null;
+          setSession(null);
+          setRecovery(false);
+        }
       },
       async sendPasswordReset(email) {
-        const { error } = await need().auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: `${siteUrl()}/auth/callback?next=${encodeURIComponent('/reset-password')}`,
-        });
-        if (error) throw error;
+        need();
+        await requestPasswordRecovery(
+          email.trim(),
+          `${siteUrl()}/auth/callback?next=${encodeURIComponent('/reset-password')}`,
+        );
       },
       async updatePassword(password) {
         const { error } = await need().auth.updateUser({ password });

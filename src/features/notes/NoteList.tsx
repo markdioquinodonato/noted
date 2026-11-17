@@ -1,46 +1,39 @@
-import { readBrowserValue, writeBrowserValue } from '@/lib/browserStorage';
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   CalendarDays,
   Archive,
   Star,
   Bell,
-  LayoutGrid,
-  List,
   ArchiveRestore,
-  CheckSquare,
   Download,
-  Folder as FolderIcon,
-  Hash,
   Menu,
   MoreHorizontal,
+  Check,
+  SlidersHorizontal,
   Copy,
   NotebookText,
   Pin,
-  Plus,
   RotateCcw,
   Search,
   SearchX,
   Trash2,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Alert, EmptyState, modKey, Spinner } from '@/components/common';
 import { useRepo } from '@/app/RepositoryProvider';
-import type { NoteSort, NoteSummary } from '@/domain/types';
-import { errorMessage, formatRelative, plural } from '@/lib/format';
+import type { NoteSort, NoteSummary, NoteView } from '@/domain/types';
+import { errorMessage, formatDateTime, formatRelative, plural } from '@/lib/format';
 import { displayTitle } from '@/lib/text';
 import { cn } from '@/lib/utils';
 import { exportNotesAsZip } from '@/features/io/txt';
@@ -59,20 +52,36 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu';
 import { NotificationInbox } from './NotificationInbox';
 import { ConfirmDialog } from './dialogs';
+import { CaptureBar } from './CaptureBar';
+import { NOTE_LAYOUT_OPTIONS, useNotesLayout, type NotesLayout } from './workspacePreferences';
+import { BrandMark } from '@/components/BrandLogo';
 
-const VIEW_TITLES: Record<string, string> = {
-  all: 'All Notes',
+const VIEW_TITLES: Record<NoteView, string> = {
+  all: 'Notes',
   favorites: 'Favorites',
   reminders: 'Reminders',
-  shared: 'Shared Notes',
+  shared: 'Shared',
   recent: 'Recent',
   pinned: 'Pinned',
   archive: 'Archive',
   trash: 'Trash',
 };
+
+const libraryViews = ['all', 'pinned', 'favorites', 'recent'] as const;
+const dateFields = [
+  ['createdAfter', 'Created since'],
+  ['updatedAfter', 'Edited since'],
+] as const;
 
 interface Props {
   filters: ListFilters;
@@ -81,10 +90,10 @@ interface Props {
   onSort: (s: NoteSort) => void;
   onDates: (patch: Partial<ListFilters>) => void;
   onClearFilter: () => void;
-  selectedId?: string;
   onOpen: (id: string) => void;
-  onCloseOpenNote: () => void;
-  onNewNote: () => void;
+  onCompose: () => void;
+  onView: (view: NoteView) => void;
+  profile: ReactNode;
   onMenu?: () => void;
 }
 
@@ -96,10 +105,10 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
     onSort,
     onDates,
     onClearFilter,
-    selectedId,
     onOpen,
-    onCloseOpenNote,
-    onNewNote,
+    onCompose,
+    onView,
+    profile,
     onMenu,
   },
   searchRef,
@@ -110,7 +119,9 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
   const tags = useTags();
   const counts = useCounts();
   const refresh = useRefreshLists();
-  const [layout, setLayout] = useState(() => readBrowserValue('noted:layout') ?? 'list');
+  const { layout, setLayout } = useNotesLayout();
+  const [dateOpen, setDateOpen] = useState(false);
+  const viewOptionsRef = useRef<HTMLButtonElement>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<null | 'delete' | 'empty'>(null);
@@ -125,7 +136,7 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
   );
   const tagById = useMemo(() => new Map((tags.data ?? []).map((t) => [t.id, t])), [tags.data]);
 
-  const filterKey = `${filters.view}|${filters.folderId}|${filters.tagId}|${filters.uncategorized}`;
+  const filterKey = JSON.stringify(filters);
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   if (prevFilterKey !== filterKey) {
     setPrevFilterKey(filterKey);
@@ -174,12 +185,6 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
         failed++;
       }
     }
-    if (
-      selectedId &&
-      ids.includes(selectedId) &&
-      (patch.deletedAt !== undefined || patch.isArchived !== undefined)
-    )
-      onCloseOpenNote();
     refresh();
     setBusy(false);
     setSelected(new Set());
@@ -205,7 +210,6 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
   const deleteSelectedForever = async () => {
     const ids = [...selected];
     for (const id of ids) await repo.deleteNotePermanently(id);
-    if (selectedId && ids.includes(selectedId)) onCloseOpenNote();
     refresh();
     setSelected(new Set());
     setSelectMode(false);
@@ -214,7 +218,6 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
 
   const emptyTrash = async () => {
     const n = await repo.emptyTrash();
-    if (selectedId) onCloseOpenNote();
     refresh();
     toast.success(n ? `Permanently deleted ${plural(n, 'note')}` : 'Trash is already empty');
   };
@@ -224,7 +227,6 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
       const saver = activeSavers.get(note.id);
       if (saver) await saver.updateMeta(patch);
       else await repo.updateNote(note.id, patch, { expectedUpdatedAt: note.updatedAt });
-      if (note.id === selectedId && patch.deletedAt) onCloseOpenNote();
       refresh();
     } catch (e) {
       toast.error(errorMessage(e));
@@ -234,66 +236,36 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
   const isTrash = filters.view === 'trash';
   const isArchive = filters.view === 'archive';
   const filterChip = filters.folderId || filters.tagId || filters.uncategorized;
+  const hasDateFilter = Boolean(filters.createdAfter || filters.updatedAfter);
 
   return (
-    <section className="flex h-full min-h-0 flex-col" aria-label="Notes list">
-      <div className="shrink-0 space-y-3 border-b px-3 pt-3 pb-3">
-        <div className="flex items-center gap-1">
+    <section className="noted-list flex h-full min-h-0 flex-col" aria-label="Notes list">
+      <div className="noted-list-header">
+        <div className="noted-list-heading">
           {onMenu && (
-            <Button variant="ghost" size="icon" onClick={onMenu} aria-label="Open navigation">
+            <Button
+              className="noted-list-nav-trigger"
+              variant="ghost"
+              size="icon"
+              onClick={onMenu}
+              aria-label="Open navigation"
+            >
               <Menu />
             </Button>
           )}
+          {onMenu && <BrandMark size={26} />}
           <div className="min-w-0 flex-1 px-1">
-            <h1 className="truncate text-base font-semibold" data-testid="list-heading">
+            <h1 className="noted-list-title truncate" data-testid="list-heading">
               {heading}
             </h1>
-            <p className="text-xs text-muted-foreground" aria-live="polite">
+            <p className="noted-list-count" aria-live="polite">
               {list.isLoading ? 'Loading…' : plural(total, 'note')}
             </p>
           </div>
-          <NotificationInbox />
-          {items.length > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={selectMode ? 'secondary' : 'ghost'}
-                  size="icon"
-                  aria-pressed={selectMode}
-                  aria-label="Select notes"
-                  onClick={() => {
-                    setSelectMode((m) => !m);
-                    setSelected(new Set());
-                  }}
-                >
-                  <CheckSquare />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Select notes</TooltipContent>
-            </Tooltip>
-          )}
-          {isTrash && (counts.data?.trash ?? 0) > 0 && !selectMode && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-destructive"
-              onClick={() => setConfirm('empty')}
-            >
-              Empty
-            </Button>
-          )}
-          {onMenu && !isTrash && (
-            <Button size="icon" onClick={onNewNote} aria-label="New note">
-              <Plus />
-            </Button>
-          )}
         </div>
 
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
+        <div className="noted-search relative">
+          <Search className="noted-search-icon pointer-events-none" aria-hidden="true" />
           <Input
             ref={searchRef}
             type="search"
@@ -308,8 +280,13 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
             placeholder="Search notes"
             title={`Search notes (${modKey}+F)`}
             aria-label="Search notes by title, content, folder or tag"
-            className="h-9 pr-8 pl-8"
+            className="noted-search-input"
           />
+          {!search && (
+            <kbd className="noted-search-key" aria-hidden="true">
+              {modKey}+F
+            </kbd>
+          )}
           {list.isFetching && !list.isFetchingNextPage && search && (
             <Spinner
               className="absolute top-1/2 right-2.5 size-4 -translate-y-1/2 text-muted-foreground"
@@ -318,84 +295,9 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <details className="group text-xs text-muted-foreground open:order-last open:w-full">
-            <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1.5 font-medium transition-colors hover:bg-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
-              <CalendarDays className="size-3.5" aria-hidden="true" />
-              Date filters{filters.createdAfter || filters.updatedAfter ? ' · active' : ''}
-            </summary>
-            <div className="mt-2 grid gap-2">
-              <label className="flex items-center justify-between gap-2">
-                Created since
-                <input
-                  type="date"
-                  aria-label="Created since"
-                  className="min-w-0 rounded border bg-background px-2 py-1"
-                  value={filters.createdAfter?.slice(0, 10) ?? ''}
-                  onChange={(e) =>
-                    onDates({
-                      createdAfter: e.target.value ? `${e.target.value}T00:00:00.000Z` : undefined,
-                    })
-                  }
-                />
-              </label>
-              <label className="flex items-center justify-between gap-2">
-                Edited since
-                <input
-                  type="date"
-                  aria-label="Edited since"
-                  className="min-w-0 rounded border bg-background px-2 py-1"
-                  value={filters.updatedAfter?.slice(0, 10) ?? ''}
-                  onChange={(e) =>
-                    onDates({
-                      updatedAfter: e.target.value ? `${e.target.value}T00:00:00.000Z` : undefined,
-                    })
-                  }
-                />
-              </label>
-            </div>
-          </details>
-          {filterChip ? (
-            <span className="inline-flex max-w-[60%] items-center gap-1 rounded-full bg-accent py-0.5 pr-1 pl-2 text-xs text-accent-foreground">
-              {filters.tagId ? <Hash className="size-3" /> : <FolderIcon className="size-3" />}
-              <span className="truncate">{heading}</span>
-              <button
-                type="button"
-                onClick={onClearFilter}
-                aria-label="Clear filter"
-                className="rounded-full p-0.5 hover:bg-primary/10"
-              >
-                <X className="size-3" />
-              </button>
-            </span>
-          ) : null}
-          <div className="flex-1" />
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label={layout === 'grid' ? 'List view' : 'Grid view'}
-            onClick={() => {
-              const next = layout === 'grid' ? 'list' : 'grid';
-              setLayout(next);
-              writeBrowserValue('noted:layout', next);
-            }}
-          >
-            {layout === 'grid' ? <List /> : <LayoutGrid />}
-          </Button>
-          <Select value={filters.sort} onValueChange={(v) => onSort(v as NoteSort)}>
-            <SelectTrigger
-              size="sm"
-              className="h-8 w-auto gap-1 border-0 bg-transparent px-2 text-xs shadow-none"
-              aria-label="Sort notes"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              <SelectItem value="updated">Last edited</SelectItem>
-              <SelectItem value="created">Date created</SelectItem>
-              <SelectItem value="title">Title (A–Z)</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="noted-list-account">
+          <NotificationInbox showWhenEmpty={filters.view === 'reminders'} />
+          {profile}
         </div>
       </div>
 
@@ -474,7 +376,101 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin" data-testid="note-list">
+      <div
+        className="noted-list-scroll min-h-0 flex-1 overflow-y-auto scrollbar-thin"
+        data-testid="note-list"
+      >
+        <div className="noted-list-command-bar">
+          {!isTrash && !isArchive && filters.view !== 'shared' && !selectMode && (
+            <CaptureBar onCompose={onCompose} />
+          )}
+          <div className="noted-list-controls">
+            {filterChip && (
+              <Button size="sm" variant="ghost" onClick={onClearFilter}>
+                Clear collection filter
+              </Button>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  ref={viewOptionsRef}
+                  variant="ghost"
+                  size="sm"
+                  className="noted-view-trigger"
+                  aria-label="View options"
+                  title="View options"
+                >
+                  <SlidersHorizontal aria-hidden="true" />
+                  View options
+                  {hasDateFilter && (
+                    <span
+                      className="size-1.5 rounded-full bg-primary"
+                      title="Date filters active"
+                    />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-50">
+                <DropdownMenuLabel>Layout</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={layout} aria-label="Layout">
+                  {NOTE_LAYOUT_OPTIONS.map(({ value, label, icon: Icon }) => (
+                    <DropdownMenuRadioItem
+                      key={value}
+                      value={value}
+                      onSelect={() => setLayout(value)}
+                    >
+                      <Icon aria-hidden="true" />
+                      {label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Show</DropdownMenuLabel>
+                {libraryViews.map((view) => (
+                  <DropdownMenuItem key={view} onSelect={() => onView(view)}>
+                    {VIEW_TITLES[view]}
+                    {filters.view === view && !filterChip && (
+                      <Check className="ml-auto" aria-label="Current view" />
+                    )}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Sort notes</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent>
+                    <DropdownMenuRadioGroup
+                      value={filters.sort}
+                      onValueChange={(value) => onSort(value as NoteSort)}
+                    >
+                      <DropdownMenuRadioItem value="updated">Last edited</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="created">Date created</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="title">Title (A–Z)</DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuItem onSelect={() => setDateOpen(true)}>
+                  <CalendarDays /> Date filters
+                </DropdownMenuItem>
+                {items.length > 0 && (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setSelectMode((value) => !value);
+                      setSelected(new Set());
+                    }}
+                  >
+                    {selectMode ? 'Exit selection' : 'Select notes'}
+                  </DropdownMenuItem>
+                )}
+                {isTrash && (counts.data?.trash ?? 0) > 0 && !selectMode && (
+                  <DropdownMenuItem variant="destructive" onSelect={() => setConfirm('empty')}>
+                    <Trash2 /> Empty Trash
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
         {list.isError ? (
           <div className="p-4">
             <Alert tone="error">
@@ -489,39 +485,33 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
             </Alert>
           </div>
         ) : list.isLoading ? (
-          <ListSkeleton />
+          <ListSkeleton layout={layout} />
         ) : items.length === 0 ? (
           <ListEmpty
             view={filters.view}
             searching={!!filters.search.trim()}
             filtered={!!filterChip}
-            onNewNote={onNewNote}
+            hasDateFilter={hasDateFilter}
           />
         ) : (
-          <ul
-            className={layout === 'grid' ? 'grid grid-cols-2 gap-2 p-2' : 'space-y-1 p-2'}
-            role="list"
-          >
+          <ul className="noted-index" data-layout={layout} role="list">
             {items.map((n) => (
               <NoteRow
                 key={n.id}
                 note={n}
-                active={n.id === selectedId}
+                showReminderDate={filters.view === 'reminders'}
                 selectMode={selectMode}
                 checked={selected.has(n.id)}
                 onToggle={() => toggle(n.id)}
                 onOpen={() => onOpen(n.id)}
-                folderName={
-                  n.folderId && !filters.folderId ? folderById.get(n.folderId)?.name : undefined
-                }
-                tagNames={n.tagIds.map((t) => tagById.get(t)?.name).filter((x): x is string => !!x)}
                 search={filters.search}
                 actions={
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
-                        size="icon-xs"
+                        size="icon-sm"
                         variant="ghost"
+                        className="noted-index-actions"
                         aria-label={`Actions for ${displayTitle(n.title, n.preview)}`}
                       >
                         <MoreHorizontal />
@@ -621,6 +611,49 @@ export const NoteList = forwardRef<HTMLInputElement, Props>(function NoteList(
         )}
       </div>
 
+      <Dialog open={dateOpen} onOpenChange={setDateOpen}>
+        <DialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            viewOptionsRef.current?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Date filters</DialogTitle>
+            <DialogDescription>Show notes created or edited on or after a date.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {dateFields.map(([key, label]) => (
+              <label
+                key={key}
+                className="flex flex-wrap items-center justify-between gap-2 text-sm"
+              >
+                {label}
+                <Input
+                  type="date"
+                  className="w-auto"
+                  value={filters[key]?.slice(0, 10) ?? ''}
+                  onChange={(event) =>
+                    onDates({
+                      [key]: event.target.value ? `${event.target.value}T00:00:00.000Z` : undefined,
+                    })
+                  }
+                />
+              </label>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => onDates({ createdAfter: undefined, updatedAfter: undefined })}
+            >
+              Clear dates
+            </Button>
+            <Button onClick={() => setDateOpen(false)}>Done</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <ConfirmDialog
         open={confirm === 'delete'}
         onOpenChange={(o) => !o && setConfirm(null)}
@@ -677,61 +710,80 @@ function snippet(preview: string, query: string): string {
 
 function NoteRow({
   note,
-  active,
+  showReminderDate,
   selectMode,
   checked,
   onToggle,
   onOpen,
-  folderName,
-  tagNames,
   search,
   actions,
 }: {
   note: NoteSummary;
-  active: boolean;
+  showReminderDate: boolean;
   selectMode: boolean;
   checked: boolean;
   onToggle: () => void;
   onOpen: () => void;
-  folderName?: string;
-  tagNames: string[];
   search: string;
   actions: React.ReactNode;
 }) {
   const now = useNow();
   const colored = !!note.color && note.color !== 'default';
+  const changedAt = note.deletedAt ?? note.updatedAt;
+  const reminderAt = note.reminderCompletedAt ? null : note.reminderAt;
+  const overdue = !!reminderAt && Date.parse(reminderAt) < now;
   const title = displayTitle(note.title, note.preview);
   const body = snippet(
-    note.title.trim() ? note.preview : note.preview.split('\n').slice(1).join('\n'),
+    note.title.trim() ? note.preview : note.preview.trimStart().split('\n').slice(1).join('\n'),
     search,
   );
   return (
     <li
       data-note-color={colored ? note.color : undefined}
-      className={cn(
-        'group/row relative rounded-xl border border-transparent transition-all',
-        colored ? 'bg-background' : 'hover:bg-muted/70',
-        colored && !active && 'hover:border-border',
-        active && 'border-primary/30 bg-accent/60 shadow-sm ring-1 ring-primary/15',
-      )}
+      data-selected={selectMode && checked}
+      className={cn('noted-index-card group/row', colored && 'noted-index-colored')}
     >
-      <div className="flex items-start gap-2 px-3 py-2.5">
+      <div className="noted-index-inner">
         {selectMode && (
           <Checkbox
             checked={checked}
             onCheckedChange={onToggle}
             aria-label={`Select ${title}`}
-            className="mt-0.5"
+            className="noted-index-checkbox"
           />
         )}
         <button
           type="button"
           onClick={selectMode ? onToggle : onOpen}
-          aria-current={active ? 'true' : undefined}
-          className="min-w-0 flex-1 rounded-sm text-left focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+          className="noted-index-entry"
           data-testid="note-row"
         >
-          <span className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              'noted-index-title line-clamp-2',
+              !note.title.trim() && !note.preview.trim() && 'text-muted-foreground',
+            )}
+          >
+            <Highlight text={title} query={search} />
+          </span>
+          {body && (
+            <span className="noted-index-preview line-clamp-2">
+              <Highlight text={body} query={search} />
+            </span>
+          )}
+          {showReminderDate && reminderAt && (
+            <span className={cn('noted-index-due', overdue && 'text-destructive')}>
+              <Bell size={14} aria-hidden="true" />
+              <time dateTime={reminderAt}>
+                {overdue ? 'Overdue · ' : ''}
+                {formatDateTime(reminderAt)}
+              </time>
+            </span>
+          )}
+          <span className="noted-index-meta">
+            <time dateTime={changedAt} title={new Date(changedAt).toLocaleString()}>
+              {formatRelative(changedAt)}
+            </time>
             {colored && (
               <span
                 aria-hidden="true"
@@ -739,57 +791,24 @@ function NoteRow({
                 style={{ background: `var(--note-${note.color})` }}
               />
             )}
-            {note.isFavorite && (
-              <Star
-                className="size-3.5 shrink-0 fill-amber-400 text-amber-500"
-                aria-label="Favorite"
+            {note.isPinned && (
+              <Pin
+                className="size-3.5 fill-primary/20 text-primary"
+                role="img"
+                aria-label="Pinned"
               />
             )}
-            {note.isPinned && (
-              <Pin className="size-3.5 shrink-0 fill-primary/20 text-primary" aria-label="Pinned" />
+            {note.isFavorite && (
+              <Star className="size-3.5 text-primary" role="img" aria-label="Favorite" />
             )}
-            <span
-              className={cn(
-                'truncate text-sm font-medium',
-                !note.title.trim() && !note.preview.trim() && 'text-muted-foreground',
-              )}
-            >
-              <Highlight text={title} query={search} />
-            </span>
-          </span>
-          {note.reminderAt && !note.reminderCompletedAt && (
-            <span
-              className={cn(
-                'flex items-center gap-1 text-xs',
-                Date.parse(note.reminderAt) < now ? 'text-destructive' : 'text-muted-foreground',
-              )}
-            >
-              <Bell className="size-3" />
-              {Date.parse(note.reminderAt) < now ? 'Overdue · ' : ''}
-              {new Date(note.reminderAt).toLocaleString()}
-            </span>
-          )}
-          {body && (
-            <span className="mt-0.5 line-clamp-2 text-[0.8125rem] leading-snug text-muted-foreground">
-              <Highlight text={body} query={search} />
-            </span>
-          )}
-          <span className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground/80">
-            <time dateTime={note.updatedAt}>
-              {formatRelative(note.deletedAt ?? note.updatedAt)}
-            </time>
-            {folderName && (
-              <span className="inline-flex min-w-0 items-center gap-0.5 truncate">
-                <FolderIcon className="size-3 shrink-0" aria-hidden="true" />
-                {folderName}
+            {reminderAt && !showReminderDate && (
+              <span
+                className={cn('inline-flex items-center', overdue && 'text-destructive')}
+                title={`${overdue ? 'Overdue reminder' : 'Reminder'} · ${new Date(reminderAt).toLocaleString()}`}
+              >
+                <Bell size={14} role="img" aria-label={overdue ? 'Overdue reminder' : 'Reminder'} />
               </span>
             )}
-            {tagNames.slice(0, 2).map((t) => (
-              <span key={t} className="truncate">
-                #{t}
-              </span>
-            ))}
-            {tagNames.length > 2 && <span>+{tagNames.length - 2}</span>}
           </span>
         </button>
         {actions}
@@ -798,14 +817,14 @@ function NoteRow({
   );
 }
 
-function ListSkeleton() {
+function ListSkeleton({ layout }: { layout: NotesLayout }) {
   return (
-    <div className="space-y-4 p-4" aria-busy="true" aria-label="Loading notes">
+    <div className="noted-index" data-layout={layout} aria-busy="true" aria-label="Loading notes">
       {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="space-y-2">
-          <Skeleton className="h-4 w-1/2" />
-          <Skeleton className="h-3 w-full" />
-          <Skeleton className="h-3 w-1/4" />
+        <div key={i} className="noted-index-skeleton space-y-2">
+          <Skeleton className="h-4 w-2/5" />
+          <Skeleton className="h-3 w-4/5" />
+          <Skeleton className="mt-4 h-3 w-1/5" />
         </div>
       ))}
     </div>
@@ -816,39 +835,65 @@ function ListEmpty({
   view,
   searching,
   filtered,
-  onNewNote,
+  hasDateFilter,
 }: {
   view: string;
   searching: boolean;
   filtered: boolean;
-  onNewNote: () => void;
+  hasDateFilter: boolean;
 }) {
+  const className = 'noted-list-empty';
   if (searching)
     return (
-      <EmptyState icon={<SearchX />} title="No matching notes">
+      <EmptyState className={className} icon={<SearchX />} title="No matching notes">
         Try a different word, or check Archive and Trash.
+      </EmptyState>
+    );
+  if (hasDateFilter)
+    return (
+      <EmptyState className={className} icon={<CalendarDays />} title="No notes in this date range">
+        Adjust your date filters in View options.
       </EmptyState>
     );
   if (view === 'trash')
     return (
-      <EmptyState icon={<Trash2 />} title="Trash is empty">
+      <EmptyState className={className} icon={<Trash2 />} title="Trash is empty">
         Deleted notes appear here so you can restore them.
       </EmptyState>
     );
   if (view === 'archive')
     return (
-      <EmptyState icon={<Archive />} title="No archived notes">
+      <EmptyState className={className} icon={<Archive />} title="No archived notes">
         Archive notes you want to keep but don’t need every day.
+      </EmptyState>
+    );
+  if (view === 'shared')
+    return (
+      <EmptyState className={className} icon={<NotebookText />} title="No shared notes">
+        Notes shared with you appear here.
+      </EmptyState>
+    );
+  if (view === 'reminders')
+    return (
+      <EmptyState className={className} icon={<Bell />} title="No reminders">
+        Use Note tools to add a reminder to a note.
+      </EmptyState>
+    );
+  if (view === 'favorites')
+    return (
+      <EmptyState className={className} icon={<Star />} title="No favorites">
+        Mark a note as a favorite for quick access.
       </EmptyState>
     );
   if (view === 'pinned')
     return (
-      <EmptyState icon={<Pin />} title="Nothing pinned">
+      <EmptyState className={className} icon={<Pin />} title="Nothing pinned">
         Pin important notes to keep them at the top.
       </EmptyState>
     );
   return (
     <EmptyState
+      className={className}
       icon={<NotebookText />}
       title={
         filtered
@@ -857,15 +902,8 @@ function ListEmpty({
             ? 'No recent notes'
             : 'Write your first note'
       }
-      action={
-        <Button onClick={onNewNote}>
-          <Plus /> New note
-        </Button>
-      }
     >
-      {filtered
-        ? 'Create a note here, or move existing notes in from the editor.'
-        : 'Your notes are saved automatically as you type.'}
+      {filtered && 'Create a note here, or move existing notes in from the editor.'}
     </EmptyState>
   );
 }

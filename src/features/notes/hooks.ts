@@ -54,12 +54,13 @@ export function useNoteList(f: ListFilters) {
   });
 }
 
-export function useNote(id: string | undefined) {
+export function useNote(id: string | undefined, allowOffline = false) {
   const { repo } = useRepo();
   return useQuery({
     queryKey: qk.note(repo.scope, id ?? ''),
     queryFn: () => repo.getNote(id!),
     enabled: !!id,
+    ...(allowOffline && { networkMode: 'always', retry: false }),
     // The editor owns the live text; avoid background refetches clobbering it.
     staleTime: Infinity,
     refetchOnWindowFocus: false,
@@ -162,18 +163,20 @@ export function usePreferences() {
   }, [query.data]);
 
   const save = useMutation({
+    scope: { id: `preferences:${repo.scope}` },
     mutationFn: (next: Preferences) => repo.savePreferences(next),
     onMutate: async (next) => {
       await qc.cancelQueries({ queryKey: qk.prefs(repo.scope) });
       const prev = qc.getQueryData<Preferences>(qk.prefs(repo.scope));
-      qc.setQueryData(qk.prefs(repo.scope), next);
+      const optimistic = qc.setQueryData(qk.prefs(repo.scope), next);
       setThemePreference(next.theme);
-      return { prev };
+      return { prev, optimistic };
     },
     onError: (e, _n, ctx) => {
-      if (ctx?.prev) {
-        qc.setQueryData(qk.prefs(repo.scope), ctx.prev);
-        setThemePreference(ctx.prev.theme);
+      if (ctx && qc.getQueryData(qk.prefs(repo.scope)) === ctx.optimistic) {
+        const restored = ctx.prev ?? DEFAULT_PREFERENCES;
+        qc.setQueryData(qk.prefs(repo.scope), restored);
+        setThemePreference(restored.theme);
       }
       toast.error(errorMessage(e, 'Could not save your settings.'));
     },
@@ -181,7 +184,11 @@ export function usePreferences() {
   return {
     prefs,
     loading: query.isLoading,
-    update: (patch: Partial<Preferences>) => save.mutate({ ...prefs, ...patch }),
+    saving: save.isPending,
+    update: (patch: Partial<Preferences>) => {
+      const current = qc.getQueryData<Preferences>(qk.prefs(repo.scope)) ?? prefs;
+      save.mutate({ ...current, ...patch });
+    },
   };
 }
 

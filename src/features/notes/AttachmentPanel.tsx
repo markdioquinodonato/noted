@@ -8,17 +8,16 @@ import {
   File as FileIcon,
   FileAudio,
   FileText,
-  ImageIcon,
   Loader2,
   Mic,
   Play,
   RotateCcw,
   Trash2,
   Upload,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
 import { useRepo } from '@/app/RepositoryProvider';
 import {
   attachmentBlob,
@@ -26,11 +25,13 @@ import {
   FILE_TYPES,
   listAttachments,
   uploadAttachment,
+  validateAttachment,
   type Attachment,
 } from '@/data/attachments';
 import { downloadBlob } from '@/features/io/txt';
 import { errorMessage } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { AttachmentMediaPreview, AttachmentThumbnail } from './AttachmentMedia';
 
 const ACCEPT = Object.values(FILE_TYPES)
   .flat()
@@ -53,7 +54,6 @@ function sizeLabel(bytes: number) {
 }
 
 function TypeIcon({ mime }: { mime: string }) {
-  if (mime.startsWith('image/')) return <ImageIcon />;
   if (mime.startsWith('audio/')) return <FileAudio />;
   if (mime === 'application/pdf' || mime.startsWith('text/') || mime.includes('word'))
     return <FileText />;
@@ -115,33 +115,37 @@ function Option({
 
 export function AttachmentPanel({
   noteId,
+  ensureCreated,
   onRecordVoice,
 }: {
   noteId: string;
+  ensureCreated(): Promise<void>;
   onRecordVoice(): void;
 }) {
   const { repo } = useRepo();
   const [busy, setBusy] = useState(false);
   const [camera, setCamera] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [preview, setPreview] = useState<{ url: string; file: Attachment } | null>(null);
+  const [preview, setPreview] = useState<Attachment | null>(null);
+  const previewTrigger = useRef<HTMLButtonElement | null>(null);
+  const openPreview = (file: Attachment, trigger: HTMLButtonElement) => {
+    previewTrigger.current = trigger;
+    setPreview(file);
+  };
   const files = useQuery({
     queryKey: ['attachments', repo.scope, noteId],
     queryFn: () => listAttachments(repo, noteId),
   });
-  useEffect(
-    () => () => {
-      if (preview) URL.revokeObjectURL(preview.url);
-    },
-    [preview],
-  );
 
   const upload = useCallback(
     async (selected: File[]) => {
       if (!selected.length) return;
       setBusy(true);
       try {
-        for (const file of selected.slice(0, 10)) await uploadAttachment(repo, noteId, file);
+        const batch = selected.slice(0, 10);
+        for (const file of batch) validateAttachment(file);
+        await ensureCreated();
+        for (const file of batch) await uploadAttachment(repo, noteId, file);
         toast.success(selected.length === 1 ? 'File attached' : 'Files attached', {
           id: 'files-attached',
         });
@@ -152,7 +156,7 @@ export function AttachmentPanel({
         void files.refetch();
       }
     },
-    [repo, noteId, files],
+    [repo, noteId, files, ensureCreated],
   );
 
   // Ctrl/⌘+V anywhere while the panel is open attaches copied files or images.
@@ -327,28 +331,24 @@ export function AttachmentPanel({
               key={file.id}
               className="flex items-center gap-3 rounded-xl border bg-card p-2 pr-1.5 transition-colors hover:bg-muted/40"
             >
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground [&_svg]:size-4">
-                <TypeIcon mime={file.mime_type} />
-              </span>
+              {file.mime_type.startsWith('image/') ? (
+                <AttachmentThumbnail file={file} onPreview={openPreview} />
+              ) : (
+                <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground [&_svg]:size-4">
+                  <TypeIcon mime={file.mime_type} />
+                </span>
+              )}
               <span className="min-w-0 flex-1 text-sm">
                 <span className="block truncate font-medium">{file.name}</span>
                 <span className="block text-xs text-muted-foreground">{sizeLabel(file.size)}</span>
               </span>
-              {(file.mime_type.startsWith('image/') || file.mime_type.startsWith('audio/')) && (
+              {file.mime_type.startsWith('audio/') && (
                 <Button
                   size="icon-sm"
                   variant="ghost"
                   aria-label={`Preview ${file.name}`}
-                  onClick={async () => {
-                    try {
-                      setPreview({
-                        file,
-                        url: URL.createObjectURL(await attachmentBlob(repo, file)),
-                      });
-                    } catch (e) {
-                      toast.error(errorMessage(e));
-                    }
-                  }}
+                  aria-haspopup="dialog"
+                  onClick={(event) => openPreview(file, event.currentTarget)}
                 >
                   <Play />
                 </Button>
@@ -393,28 +393,19 @@ export function AttachmentPanel({
         </ul>
       </section>
 
-      {preview && (
-        <div className="relative rounded-xl border bg-muted/40 p-2">
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            className="absolute top-1.5 right-1.5 z-10 bg-background/80"
-            aria-label="Close preview"
-            onClick={() => setPreview(null)}
-          >
-            <X />
-          </Button>
-          {preview.file.mime_type.startsWith('image/') ? (
-            <img
-              src={preview.url}
-              alt={preview.file.name}
-              className="mx-auto max-h-64 rounded-lg object-contain"
-            />
-          ) : (
-            <audio src={preview.url} controls className="w-full" />
-          )}
-        </div>
-      )}
+      <Dialog open={preview !== null} onOpenChange={(open) => !open && setPreview(null)}>
+        {preview && (
+          <AttachmentMediaPreview
+            file={preview}
+            onCloseAutoFocus={(event) => {
+              if (previewTrigger.current?.isConnected) {
+                event.preventDefault();
+                previewTrigger.current.focus();
+              }
+            }}
+          />
+        )}
+      </Dialog>
     </div>
   );
 }

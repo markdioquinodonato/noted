@@ -1,3 +1,4 @@
+import { openNewEditor, showNoteTools } from './noteTools';
 import { test, expect, chromium } from '@playwright/test';
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { resolve, join, sep } from 'node:path';
@@ -20,7 +21,7 @@ test('guest can capture a camera photo and recognize English text entirely offli
   await expect(page.getByRole('link', { name: 'Log In', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Create an Account' })).toBeVisible();
   await page.getByRole('button', { name: 'Continue as Guest' }).click();
-  await expect(page.getByText('Welcome to Noted', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Notes', exact: true })).toBeVisible();
   const image = await page.evaluate(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 1200;
@@ -43,8 +44,9 @@ test('guest can capture a camera photo and recognize English text entirely offli
       );
   });
   await context.setOffline(true);
-  await page.getByRole('button', { name: 'New note', exact: true }).first().click();
+  await openNewEditor(page);
   await page.getByRole('textbox', { name: 'Note title' }).fill('Scanned text');
+  await showNoteTools(page);
   await page.getByRole('button', { name: 'Scan text with camera', exact: true }).click();
   await expect(page.getByLabel('Camera preview')).toBeVisible();
   await expect
@@ -86,22 +88,24 @@ test('guest account menu exposes optional account actions and data information',
 }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue as Guest' }).click();
-  if ((page.viewportSize()?.width ?? 1000) < 768)
-    await page.getByRole('button', { name: 'Open navigation' }).click();
-  await page.getByRole('button', { name: 'Guest account menu' }).click();
+  const profile = page.getByRole('button', { name: 'Profile', exact: true });
+  await expect(profile).toHaveCount(1);
+  await profile.press('Enter');
   for (const name of [
-    'Log In',
+    'Sign In',
     'Create Account',
     'Import Notes',
     'Export Notes',
     'Guest Data Information',
+    'Settings',
+    'Download Noted',
   ])
     await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible();
   await page.getByRole('menuitem', { name: 'Guest Data Information' }).click();
   await expect(page.getByRole('dialog')).toContainText('does not provide cloud backups');
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Guest account menu' }).click();
-  await page.getByRole('menuitem', { name: 'Log In', exact: true }).click();
+  await page.getByRole('button', { name: 'Profile', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Sign In', exact: true }).click();
   await expect(page).toHaveURL(/\/login\?next=%2Fimport/);
   await expect(page.getByText(/Cloud accounts aren’t configured/)).toBeVisible();
   await page.getByRole('link', { name: 'Back to notes' }).click();
@@ -120,7 +124,7 @@ test('guest IndexedDB notes survive a complete browser restart', async ({ browse
   try {
     let page = await context.newPage();
     await page.goto('http://localhost:4173/notes');
-    await page.getByRole('button', { name: 'New note', exact: true }).first().click();
+    await openNewEditor(page);
     await page.getByRole('textbox', { name: 'Note title' }).fill('Persistent guest journal');
     await page.getByRole('textbox', { name: 'Note content' }).fill('Kept across browser processes');
     await expect(page.getByTestId('save-status').filter({ visible: true })).toHaveAttribute(
@@ -170,5 +174,5 @@ test('guest sees an honest warning when browser storage is unavailable', async (
   await expect(
     page.getByRole('alert').filter({ hasText: 'Local browser storage is unavailable or full.' }),
   ).toBeVisible();
-  await expect(page.getByText('Welcome to Noted', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Notes', exact: true })).toBeVisible();
 });

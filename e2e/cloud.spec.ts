@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { closeEditor, openNewEditor } from './noteTools';
 
 /**
  * Account / cloud journeys. These require a dedicated Supabase TEST project
@@ -34,10 +35,7 @@ test('login, cloud save, logout, and retrieval from a second device', async ({ b
   const deviceA = await browser.newContext();
   const pageA = await deviceA.newPage();
   await login(pageA, A);
-  await pageA
-    .getByRole('navigation', { name: 'Notes navigation' })
-    .getByRole('button', { name: 'New note' })
-    .click();
+  await openNewEditor(pageA);
   await pageA.getByRole('textbox', { name: 'Note title' }).fill(title);
   await pageA.getByRole('textbox', { name: 'Note content' }).fill('synced body');
   await expect(pageA.getByTestId('save-status').filter({ visible: true })).toContainText(
@@ -58,24 +56,29 @@ test('login, cloud save, logout, and retrieval from a second device', async ({ b
 
   // Logout
   await pageA.goto('/settings');
-  await pageA.getByRole('button', { name: 'Log out' }).click();
+  await pageA.getByRole('button', { name: 'Profile', exact: true }).click();
+  const signOut = pageA.getByRole('menuitem', { name: 'Sign Out', exact: true });
+  await expect(signOut).toHaveCount(1);
+  await signOut.click();
   await expect(pageA).toHaveURL(/\/welcome/);
+  await expect(pageA.getByRole('button', { name: 'Continue as Guest' })).toBeVisible();
+  await pageB.reload();
+  await expect(pageB.getByTestId('note-list').getByText(title)).toBeVisible();
 });
 
 test('guest → account import of notes', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Continue as Guest' }).click();
   const title = `Guest ${Date.now()}`;
-  await page
-    .getByRole('navigation', { name: 'Notes navigation' })
-    .getByRole('button', { name: 'New note' })
-    .click();
+  await openNewEditor(page);
   await page.getByRole('textbox', { name: 'Note title' }).fill(title);
   await expect(page.getByTestId('save-status').filter({ visible: true })).toHaveAttribute(
     'data-status',
     'saved',
   );
-  await page.getByRole('button', { name: 'Save my notes to cloud' }).click();
+  await closeEditor(page);
+  await page.getByRole('button', { name: 'Profile', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Save my notes to cloud', exact: true }).click();
   await page.getByRole('link', { name: 'Log in' }).click();
   await page.getByLabel('Email').fill(A.email);
   await page.getByLabel('Password').fill(A.password);

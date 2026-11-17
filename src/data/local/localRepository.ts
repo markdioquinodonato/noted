@@ -1,4 +1,5 @@
 import type { NotesRepository, UpdateOptions } from '@/domain/repository';
+import { deleteNoteTranscript } from '@/features/transcription/storage';
 import {
   ConflictError,
   DEFAULT_PREFERENCES,
@@ -108,8 +109,7 @@ export class LocalNotesRepository implements NotesRepository {
       updatedAt: now,
       tagIds: [...new Set(input.tagIds ?? [])],
     };
-    await tx.objectStore('notes').add(note);
-    await tx.done;
+    await Promise.all([tx.objectStore('notes').add(note), tx.done]);
     return note;
   }
 
@@ -182,6 +182,7 @@ export class LocalNotesRepository implements NotesRepository {
     for (const k of vs) await tx.objectStore('versions').delete(k);
     await tx.done;
     await removeLocalAttachments(id);
+    await deleteNoteTranscript(this.scope, id);
   }
 
   async emptyTrash(): Promise<number> {

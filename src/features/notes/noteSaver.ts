@@ -1,6 +1,9 @@
+import type { DraftRecord } from '@/data/drafts';
 import type { NotesRepository } from '@/domain/repository';
 import { ConflictError, isNetworkError, type Note, type NoteDraft } from '@/domain/types';
 import { errorMessage } from '@/lib/format';
+import { reportOperationalEvent } from '@/features/admin/telemetry';
+import { createCompositionNote, hasCompositionText, type NoteComposition } from './noteComposition';
 
 export type SaveStatus = 'saved' | 'unsaved' | 'saving' | 'offline' | 'error' | 'conflict';
 
@@ -12,13 +15,7 @@ export interface SaverState {
 }
 
 export interface DraftSink {
-  put(rec: {
-    scope: string;
-    noteId: string;
-    title: string;
-    content: string;
-    baseUpdatedAt: string;
-  }): Promise<void>;
+  put(rec: Omit<DraftRecord, 'key' | 'savedAt'>): Promise<void>;
   clear(
     scope: string,
     noteId: string,
@@ -26,8 +23,14 @@ export interface DraftSink {
   ): Promise<void>;
 }
 
-export interface NoteSaverOptions {
-  repo: Pick<NotesRepository, 'updateNote' | 'scope'>;
+type SaveRepository = Pick<NotesRepository, 'updateNote' | 'scope'>;
+type CompositionSaveRepository = SaveRepository &
+  Pick<NotesRepository, 'createNote' | 'getNote' | 'setNoteTags'>;
+
+export type NoteSaverOptions = (
+  | { repo: SaveRepository; creation?: undefined }
+  | { repo: CompositionSaveRepository; creation?: NoteComposition }
+) & {
   drafts?: DraftSink;
   delayMs?: number;
   draftDelayMs?: number;
@@ -40,7 +43,7 @@ export interface NoteSaverOptions {
   initialDirty?: { title: string; content: string };
   /** Concurrency base for `initialDirty` (the draft's baseUpdatedAt). */
   initialBase?: string;
-}
+};
 
 /** Savers for currently open editors (for bulk actions and unload protection). */
 export const activeSavers = new Map<string, NoteSaver>();
@@ -84,6 +87,7 @@ export class NoteSaver {
   private readonly opts: Required<Pick<NoteSaverOptions, 'delayMs' | 'draftDelayMs'>> &
     NoteSaverOptions;
   private autosave: boolean;
+  private composition?: NoteComposition;
 
   constructor(
     readonly noteId: string,
@@ -92,9 +96,10 @@ export class NoteSaver {
   ) {
     this.opts = { delayMs: 800, draftDelayMs: 300, ...opts };
     this.autosave = opts.autosave ?? true;
+    this.composition = opts.creation;
     this.value = { title: initial.title, content: initial.content };
     this.base = initial.updatedAt;
-    this.state.lastSavedAt = initial.updatedAt;
+    if (!this.composition) this.state.lastSavedAt = initial.updatedAt;
     if (
       opts.initialDirty &&
       (opts.initialDirty.title !== initial.title || opts.initialDirty.content !== initial.content)
@@ -128,6 +133,10 @@ export class NoteSaver {
     return this.base;
   }
 
+  get isNew() {
+    return this.composition !== undefined;
+  }
+
   hasUnsavedChanges(): boolean {
     return this.rev !== this.savedRev;
   }
@@ -151,7 +160,11 @@ export class NoteSaver {
     if (next.title === this.value.title && next.content === this.value.content) return;
     this.value = next;
     this.rev++;
-    if (!this.conflicted) this.setState({ status: 'unsaved', error: undefined });
+    this.setState(
+      this.conflicted
+        ? { localDraftSaved: undefined }
+        : { status: 'unsaved', error: undefined, localDraftSaved: undefined },
+    );
     this.scheduleDraft();
     if (this.autosave && !this.conflicted) this.schedule(this.opts.delayMs);
   }
@@ -167,6 +180,12 @@ export class NoteSaver {
     if (this.inflight) await this.inflight;
   }
 
+  /** Materialize a note for a tool that needs to store something against it. */
+  async ensureCreated(): Promise<void> {
+    while (this.inflight) await this.inflight;
+    if (this.composition) await this.updateMeta({});
+  }
+
   /**
    * Apply metadata changes (pin, folder, archive, trash …) serialised with text
    * saves so the concurrency token never goes stale. Unsaved text is included.
@@ -179,11 +198,7 @@ export class NoteSaver {
       const rev = this.rev;
       const text = this.hasUnsavedChanges() ? { ...this.value } : {};
       const payload = { ...this.value };
-      const note = await this.opts.repo.updateNote(
-        this.noteId,
-        { ...meta, ...text },
-        { expectedUpdatedAt: this.base },
-      );
+      const note = await this.persist({ ...meta, ...text });
       result = note;
       this.base = note.updatedAt;
       if (rev > this.savedRev) this.savedRev = rev;
@@ -215,7 +230,10 @@ export class NoteSaver {
 
   /** Conflict resolution: keep local text and overwrite the remote version. */
   keepMine(latest: Note | null) {
-    if (latest) this.base = latest.updatedAt;
+    if (latest) {
+      this.base = latest.updatedAt;
+      this.composition = undefined;
+    }
     this.conflicted = false;
     this.setState({ status: 'unsaved' });
     void this.save();
@@ -224,6 +242,7 @@ export class NoteSaver {
   /** Conflict resolution: discard local edits and adopt the stored version. */
   async discardMine(latest: Note) {
     this.conflicted = false;
+    this.composition = undefined;
     this.value = { title: latest.title, content: latest.content };
     this.base = latest.updatedAt;
     this.savedRev = this.rev;
@@ -290,6 +309,7 @@ export class NoteSaver {
       this.draftTimer = null;
     }
     if (!this.opts.drafts || !this.hasUnsavedChanges()) return;
+    const revision = this.rev;
     try {
       await this.opts.drafts.put({
         scope: this.opts.repo.scope,
@@ -297,13 +317,16 @@ export class NoteSaver {
         title: this.value.title,
         content: this.value.content,
         baseUpdatedAt: this.base,
+        ...(this.composition && { creation: this.composition }),
       });
-      if (!this.state.localDraftSaved) this.setState({ localDraftSaved: true });
+      if (revision === this.rev && this.hasUnsavedChanges() && !this.state.localDraftSaved)
+        this.setState({ localDraftSaved: true });
     } catch {
-      this.setState({
-        localDraftSaved: false,
-        error: 'Local backup failed. Keep this tab open and download your edits.',
-      });
+      if (revision === this.rev && this.hasUnsavedChanges())
+        this.setState({
+          localDraftSaved: false,
+          error: 'Local backup failed. Keep this tab open and download your edits.',
+        });
     }
   }
 
@@ -334,12 +357,28 @@ export class NoteSaver {
     this.onlineHandler = null;
   }
 
+  private async persist(patch: NoteDraft): Promise<Note> {
+    const { opts, composition } = this;
+    if (!composition || !opts.creation)
+      return opts.repo.updateNote(this.noteId, patch, { expectedUpdatedAt: this.base });
+    const note = await createCompositionNote(opts.repo, composition, patch);
+    this.composition = undefined;
+    return note;
+  }
+
   private save(): Promise<void> {
     if (this.inflight) {
       this.again = true;
       return this.inflight.catch(() => undefined);
     }
     if (this.conflicted || !this.hasUnsavedChanges()) return Promise.resolve();
+    if (this.composition && !hasCompositionText(this.value)) {
+      this.savedRev = this.rev;
+      this.setState({ status: 'saved', error: undefined });
+      return (
+        this.opts.drafts?.clear(this.opts.repo.scope, this.noteId, this.value) ?? Promise.resolve()
+      );
+    }
     if (!this.isOnline()) {
       this.waitForOnline();
       return Promise.resolve();
@@ -354,9 +393,7 @@ export class NoteSaver {
           const payload = { ...this.value };
           this.setState({ status: 'saving' });
           try {
-            const note = await this.opts.repo.updateNote(this.noteId, payload, {
-              expectedUpdatedAt: this.base,
-            });
+            const note = await this.persist(payload);
             this.base = note.updatedAt;
             if (rev > this.savedRev) this.savedRev = rev;
             this.retryDelay = 0;
@@ -369,6 +406,14 @@ export class NoteSaver {
               this.setState({ status: 'unsaved', lastSavedAt: note.updatedAt });
             }
           } catch (err) {
+            if (this.opts.repo.scope !== 'guest')
+              void reportOperationalEvent(
+                err instanceof ConflictError
+                  ? 'sync_conflict'
+                  : isNetworkError(err) || !this.isOnline()
+                    ? 'sync_offline'
+                    : 'sync_failed',
+              );
             if (err instanceof ConflictError) {
               this.conflicted = true;
               await this.writeDraftNow();

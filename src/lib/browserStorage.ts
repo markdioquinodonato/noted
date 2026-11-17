@@ -13,10 +13,12 @@ export function writeBrowserValue(
   key: string,
   value: string,
   area: StorageArea = 'localStorage',
-): void {
+): boolean {
   try {
     window[area].setItem(key, value);
+    return true;
   } catch {
     /* The current UI state remains usable. */
+    return false;
   }
 }
